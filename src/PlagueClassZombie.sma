@@ -881,9 +881,9 @@ public plugin_init()
     RegisterHookChain(RG_CBasePlayer_Pain, "Pain");
     RegisterHookChain(RG_CBasePlayer_DeathSound, "DeathSound");
 
-    //RegisterHam(Ham_Item_Deploy, "weapon_knife", "Hands_Post", 1);
-    //RegisterHam(Ham_Weapon_PrimaryAttack, "weapon_knife", "HandsAttack1_Post", 1);
-    //RegisterHam(Ham_Weapon_SecondaryAttack, "weapon_knife", "HandsAttack2_Post", 1);
+    RegisterHam(Ham_Item_Deploy, "weapon_knife", "Hands_Post", 1);
+    RegisterHam(Ham_Weapon_PrimaryAttack, "weapon_knife", "HandsAttack1_Post", 1);
+    RegisterHam(Ham_Weapon_SecondaryAttack, "weapon_knife", "HandsAttack2_Post", 1);
     RegisterHam(Ham_Spawn, "player", "Player_Spawn_Post", 1);
 
     RegisterHam(Ham_CS_Player_ResetMaxSpeed, "player", "ResetSpeed_Post", 1);
