@@ -126,7 +126,7 @@ TransformNotice(id, attacker)
     message_end();
 }
 
-MakeHuman(id, attacker, bool:spawn, bool:flags)
+MakeHuman(id, attacker, bool:spawn, bool:flags, bool:health)
 {
     new oldclass = iClass[id];
 
@@ -154,12 +154,15 @@ MakeHuman(id, attacker, bool:spawn, bool:flags)
         ArrayGetString(ClassInfo[Human_Model], iClass[id], szModel, charsmax(szModel));
         rg_set_user_model(id, szModel, true);
 
-        if(spawn)
+        if(health)
         {
             new hp = ArrayGetCell(ClassAttributes[Human_Health], iClass[id]);
             set_entvar(id, var_health, float(hp));
             set_entvar(id, var_max_health, float(hp));
+        }
 
+        if(spawn)
+        {
             rg_give_item(id, "weapon_usp");
             rg_set_user_bpammo(id, WEAPON_USP, 48);
         }
@@ -179,7 +182,7 @@ MakeHuman(id, attacker, bool:spawn, bool:flags)
     ExecuteForward(glForwards[FWD_TRANSFORM_POST], ret, id, attacker, oldclass, iNextClass[id], spawn);
 }
 
-Transform(id, bool:human, attacker, bool:spawn, bool:flags)
+Transform(id, bool:human, attacker, bool:spawn, bool:flags, bool:health)
 {
     if(!IsPlayer(id))
     {
@@ -188,7 +191,7 @@ Transform(id, bool:human, attacker, bool:spawn, bool:flags)
     }
 
     if(human)
-        MakeHuman(id, attacker, spawn, flags);
+        MakeHuman(id, attacker, spawn, flags, health);
 
     bHuman[id] = human;
 
@@ -417,7 +420,7 @@ public Native_NextAvailable(id)
     return FirstAvailableClass(id);
 }
 
-public Native_SetHuman(id, bool:human, attacker, bool:spawn, bool:flags)
+public Native_SetHuman(id, bool:human, attacker, bool:spawn, bool:flags, bool:health)
 {
     if(!IsPlayer(id))
     {
@@ -425,7 +428,7 @@ public Native_SetHuman(id, bool:human, attacker, bool:spawn, bool:flags)
         return 0;
     }
 
-    Transform(id, human, attacker, spawn, flags);
+    Transform(id, human, attacker, spawn, flags, health);
 
     return 1;
 }
@@ -447,7 +450,7 @@ public Native_SetRace(id, race)
     iNextClass[id] = race;
 
     if(bHuman[id])
-        Transform(id, true, -1, true, false);
+        Transform(id, true, -1, true, false, true);
 
     return 1;
 }
@@ -783,7 +786,7 @@ public Player_Spawn_Post(id)
     if(get_member(id, m_bJustConnected) || !bHuman[id])
         return;
 
-    MakeHuman(id, -1, true, false);
+    MakeHuman(id, -1, true, false, true);
 }
 
 public TakeDamage_Post(id, inflictor, attacker, Float: flDamage, dmgBits)

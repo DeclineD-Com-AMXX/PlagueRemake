@@ -22,11 +22,10 @@ new const pluginAuthor[ ] = "DeclineD";
 
 /* -> Default Knife Time <- */
 const Float: flKnifeAttack1Time = 0.4;
+const Float: flKnifeAttack1Miss = 0.35;
 
-const Float: flKnifeAttack1Miss = 1.0;
-
-const Float: flKnifeAttack2Miss = 1.0;
 const Float: flKnifeAttack2Time = 1.1;
+const Float: flKnifeAttack2Miss = 1.0;
 
 
 /* -> Cvars <- */
@@ -189,7 +188,7 @@ TransformNotice(id, attacker)
     message_end();
 }
 
-MakeZombie(id, attacker, bool:spawn, bool:flags)
+MakeZombie(id, attacker, bool:spawn, bool:flags, bool:health)
 {
     new oldclass = iClass[id];
 
@@ -221,12 +220,15 @@ MakeZombie(id, attacker, bool:spawn, bool:flags)
         set_entvar(id, var_viewmodel, szModel);
         set_entvar(id, var_weaponmodel, "");
 
-        if(spawn)
+        if(health)
         {
             new hp = ArrayGetCell(ClassAttributes[Zombie_Health], iClass[id]);
             set_entvar(id, var_health, float(hp));
             set_entvar(id, var_max_health, float(hp));
+        }
 
+        if(spawn)
+        {
             new Array: a = ArrayGetCell(ClassInfo[Zombie_SoundsSpawn], iClass[id]);
 
             if(a > Invalid_Array)
@@ -255,7 +257,7 @@ MakeZombie(id, attacker, bool:spawn, bool:flags)
     ExecuteForward(glForwards[FWD_TRANSFORM_POST], ret, id, attacker, oldclass, iNextClass[id], spawn);
 }
 
-Transform(id, bool:zombie, attacker, bool:spawn, bool:flags)
+Transform(id, bool:zombie, attacker, bool:spawn, bool:flags, bool:health)
 {
     if(!IsPlayer(id))
     {
@@ -264,10 +266,10 @@ Transform(id, bool:zombie, attacker, bool:spawn, bool:flags)
     }
 
     if(zombie)
-        MakeZombie(id, attacker, spawn, flags);
+        MakeZombie(id, attacker, spawn, flags, health);
 
     bZombie[id] = zombie;
-    pr_set_user_human(id, !zombie);
+    pr_set_user_human(id, !zombie, attacker, spawn, flags, health);
 
     return 1;
 }
@@ -512,7 +514,7 @@ public Native_NextAvailable(id)
     return FirstAvailableClass(id);
 }
 
-public Native_SetZombie(id, bool:zombie, attacker, bool:spawn, bool:flags)
+public Native_SetZombie(id, bool:zombie, attacker, bool:spawn, bool:flags, bool:health)
 {
     if(!IsPlayer(id))
     {
@@ -520,7 +522,7 @@ public Native_SetZombie(id, bool:zombie, attacker, bool:spawn, bool:flags)
         return 0;
     }
 
-    Transform(id, zombie, attacker, spawn, flags);
+    Transform(id, zombie, attacker, spawn, flags, health);
 
     return 1;
 }
@@ -542,7 +544,7 @@ public Native_SetRace(id, race)
     iNextClass[id] = race;
 
     if(bZombie[id])
-        Transform(id, true, -1, true, false);
+        Transform(id, true, -1, true, false, true);
 
     return 1;
 }
@@ -777,9 +779,7 @@ public any:Native_SetAttr(plgId, argc)
             ArraySetCell(any:ClassAttributes[id], class, value);
         }
 
-        case Zombie_SpeedAdd,
-            Zombie_Painshock,
-            Zombie_Knockback:
+        default:
         {
             new Float: flValue = get_param_f(3);
             ArraySetCell(any:ClassAttributes[id], class, flValue);
@@ -904,7 +904,7 @@ public cmdZm(id)
 
 public cmdZomb(id)
 {
-    Transform(id, !bZombie[id], 0, true, false);
+    Transform(id, !bZombie[id], 0, true, false, true);
 }
 
 public Player_Spawn_Post(id)
@@ -912,7 +912,7 @@ public Player_Spawn_Post(id)
     if(get_member(id, m_bJustConnected) || !bZombie[id])
         return;
 
-    Transform(id, true, -1, true, false);
+    Transform(id, true, -1, true, false, true);
 }
 
 public TakeDamage_Post(id, inflictor, attacker, Float: flDamage, dmgBits)
@@ -1110,7 +1110,7 @@ public HandsAttack1_Post(item)
     new Float: DelayStart;
     new Float: flAttack2Time;
 
-    if(flKnifeAttack1Time-0.1 > flAttackTime <= flKnifeAttack1Time)
+    if(flKnifeAttack1Time-0.1 < flAttackTime <= flKnifeAttack1Time)
     {
         DelayStart = flKnifeAttack1Time - flAttackTime;
 
@@ -1152,7 +1152,7 @@ public HandsAttack2_Post(item)
     new Float: DelayStart = 0.0;
     new Float: flAttackTime = 0.0;
 
-    if(flKnifeAttack2Time-0.1 > flAttack2Time <= flKnifeAttack2Time)
+    if(flKnifeAttack2Time-0.1 < flAttack2Time <= flKnifeAttack2Time)
     {
         DelayStart = flKnifeAttack2Time - flAttack2Time;
 
@@ -1165,7 +1165,7 @@ public HandsAttack2_Post(item)
         if(flAttack2Time > 0.0)
             set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime-DelayStart);
     }
-    else if(flKnifeAttack2Miss-0.1 > flAttack2Time <= flKnifeAttack2Miss)
+    else if(flKnifeAttack2Miss-0.1 < flAttack2Time <= flKnifeAttack2Miss)
     {
         DelayStart = flKnifeAttack2Miss - flAttack2Time;
 
