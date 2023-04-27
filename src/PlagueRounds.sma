@@ -11,20 +11,20 @@
 
 
 /* -> Some Macros <- */
-#define Call->%0->Pre() \
-    new ret; \
-    ExecuteForward(%0[0], ret); \
-    if(ret > _:Plague_Continue) \
-        return
+// #define Call->%0->Pre() \
+//     new ret; \
+//     ExecuteForward(%0[0], ret); \
+//     if(ret > _:Plague_Continue) \
+//         return
 
-#define Call->%0->Pre(%2) \
-    new ret; \
-    ExecuteForward(%0[0], ret, %2); \
-    if(ret > _:Plague_Continue) \
-        return
+// #define Call->%0->Pre(%2) \
+//     new ret; \
+//     ExecuteForward(%0[0], ret, %2); \
+//     if(ret > _:Plague_Continue) \
+//         return
 
-#define Call->%0->Post(%2) ExecuteForward(%0[0], _, %2)
-#define Call->%0->Post ExecuteForward(%0[0])
+// #define Call->%0->Post(%2) ExecuteForward(%0[0], _, %2)
+// #define Call->%0->Post ExecuteForward(%0[0])
 
 
 /* -> Plugin Info <- */
@@ -57,7 +57,7 @@ new glbRespawnCount;
 
 
 /* -> Waiting For Players <- */
-new fwdWFPEnd[2];
+new fwdWFPEnd;
 
 new cWFPMin, cWFPRestartTime, cWFPTime;
 new Float: flWFPTime;
@@ -74,7 +74,7 @@ new cRoundDelay, cFreezeDelay;
 
 new iRounds, iMaxRounds;
 new GameWin: iLastWin;
-new GameWin: iGameWIn;
+new GameWin: iGameWin;
 new WinEvent: iLastWinEvent;
 new WinEvent: iWinEvent;
 new RestartType: iLastRestart;
@@ -180,8 +180,100 @@ public plugin_natives()
 
 public Native_RoundStatus()
 {
+    if(bWFP)
+        return RoundStatus_WaitingForPlayers;
     
+    if(!bRoundEnded && !bRoundStarted)
+        return RoundStatus_Starting;
+
+    if(bRoundEnded)
+        return RoundStatus_Ended;
+    
+    return RoundStatus_Started;
 }
+
+public WinEvent:Native_LastWinEvent()
+{
+    return iLastWinEvent;
+}
+
+public RestartType:Native_LastRestart()
+{
+    return iLastRestart;
+}
+
+public GameWin:ative_LastGameWin()
+{
+    return iLastWin;
+}
+
+public RoundType:Native_GetRoundType()
+{
+    return iRoundType;
+}
+
+public Native_SetRoundType(RoundType:type)
+{
+    iRoundType = type;
+}
+
+public RoundTimer:Native_GetTimerStatus()
+{
+    return iRoundTimer;
+}
+
+public FreezeDelayTeam:Native_GetFreezeTeam()
+{
+    return iFreezeTeam;
+}
+
+public FreezeDelayType:Native_GetFreezeType()
+{
+    return iFreezeType;
+}
+
+public Native_SetFreezeTeam(FreezeDelayTeam:team)
+{
+    iFreezeTeam = team;
+}
+
+public Native_SetFreezeType(FreezeDelayType:type)
+{
+    iFreezeType = type;
+}
+
+public RoundStartType:Native_GetRoundStartType()
+{
+    return iStartType;
+}
+
+public Native_SetRoundStartType(RoundStartType:type)
+{
+    iStartType = type;
+}
+
+public Native_EndRound(plgId, params)
+{
+    if(params < 5)
+    {
+        log_error(AMX_ERR_NATIVE, "NOT ENOUGH PARAMS");
+        return 0;
+    }
+
+    new Float: delay = any:get_param(1),
+        WinEvent: event = any:get_param(2),
+        GameWin: win = any:get_param(3),
+        szMsg[196],
+        szSound[128];
+
+    get_string(4, szMsg, charsmax(szMsg));
+    get_string(5, szSound, charsmax(szSound));
+
+    EndRound(delay, event, win, szMsg, szSound);
+
+    return 1;
+}
+
 
 
 /* -> Private Functions <- */
@@ -225,7 +317,11 @@ RemoveFromRespawnQueue( id, pos )
 
 AddToRespawnQueue( id )
 {
-    Call->fwdRespawnQueue->Pre(id);
+    new ret;
+    ExecuteForward( fwdRespawnQueue[ 0 ], ret, id );
+
+    if( ret > _:Plague_Stop )
+        return;
 
     // If already in the queue exit
     if( glbRespawnPos[ id ] > -1 )
@@ -241,12 +337,12 @@ AddToRespawnQueue( id )
 
     glbRespawnCount++;
 
-    Call->fwdRespawnQueue->Post(id);
+    ExecuteForward( fwdRespawnQueue[ 1 ], _, id );
 }
 
 CheckRespawning( Float: flGametime )
 {
-    if(!bRespawnPending)
+    if( !bRespawnPending )
         return;
     
     new i = 1, pos = 0;
@@ -299,7 +395,11 @@ bool: CanRespawn( id )
 
 Respawn( id )
 {
-    Call->fwdRespawn->Pre(id);
+    new ret;
+    ExecuteForward( fwdRespawn[ 0 ], ret, id );
+
+    if( ret > _:Plague_Stop )
+        return;
 
     new iRand = random_num(0, 1);
     if(iRespawnType == Respawn_Zombie2 ||
@@ -319,7 +419,7 @@ Respawn( id )
 
     rg_round_respawn(id);
 
-    Call->fwdRespawn->Post(id);
+    ExecuteForward( fwdRespawn[ 1 ], _, id );
 }
 
 // Round
@@ -328,7 +428,14 @@ EndRound(Float:delay, WinEvent:event, GameWin:win, msg[], sound[])
     new hmsg = PrepareArray(msg, 128);
     new hsound = PrepareArray(sound, 128);
 
-    Call->fwdRoundEnd->Pre(delay, event, win, hmsg, hsound);
+    new ret;
+    ExecuteForward( fwdRoundEnd[ 0 ], ret, delay, event, win, hmsg, hsound);
+
+    if( ret > _:Plague_Stop )
+    {
+        ExecuteForward( fwdRoundEnd[ 1 ], _, delay, event, win, hmsg, hsound);
+        return;
+    }
 
     if(iRoundType == Round_Custom)
         return;
@@ -356,7 +463,7 @@ EndRound(Float:delay, WinEvent:event, GameWin:win, msg[], sound[])
     rg_round_end(delay, win2, event2, msg, "");
     UTIL_PlaySound(.Sound = sound);
 
-    Call->fwdRoundEnd->Post(delay, event, win, hmsg, hsound);
+    ExecuteForward( fwdRoundEnd[ 1 ], _, delay, event, win, hmsg, hsound);
 }
 
 // Waiting For Players Check
@@ -425,8 +532,7 @@ public plugin_precache()
     fwdRoundEnd[ 0 ] = CreateMultiForward( "Plague_RoundEnd", ET_CONTINUE, FP_CELL, FP_CELL, FP_CELL, FP_STRING, FP_STRING );
     fwdRoundEnd[ 1 ] = CreateMultiForward( "Plague_RoundEnd_Post", ET_IGNORED, FP_CELL, FP_CELL, FP_CELL, FP_STRING, FP_STRING );
 
-    fwdWFPEnd[ 0 ] = CreateMultiForward( "Plague_WaitForPlayers_End", ET_CONTINUE );
-    fwdWFPEnd[ 1 ] = CreateMultiForward( "Plague_WaitForPlayers_End_Post", ET_IGNORED );
+    fwdWFPEnd = CreateMultiForward( "Plague_WaitForPlayers_End", ET_IGNORED );
 
     fwdRespawn[ 0 ] = CreateMultiForward( "Plague_Respawn", ET_CONTINUE, FP_CELL );
     fwdRespawn[ 1 ] = CreateMultiForward( "Plague_Respawn_Post", ET_IGNORED, FP_CELL );
@@ -529,14 +635,22 @@ public CheckWinConditions()
 
 public eventNewRound()
 {
-    Call->fwdRoundStart->Pre();
+    new ret;
+    ExecuteForward( fwdRoundStart[ 0 ], ret );
 
-    Call->fwdRoundStart->Post();
+    if( ret > _:Plague_Continue )
+        return;
+
+    ExecuteForward( fwdRoundStart[ 1 ] );
 }
 
 public OnFreezeEnd_Post()
 {
-    Call->fwdFreezeEnd->Pre();
+    new ret;
+    ExecuteForward( fwdFreezeEnd[ 0 ], ret );
 
-    Call->fwdFreezeEnd->Post();
+    if( ret > _:Plague_Continue )
+        return;
+
+    ExecuteForward( fwdFreezeEnd[ 1 ] );
 }
