@@ -16,9 +16,9 @@ static class[2];
 public plugin_precache()
 {
     new Array:a[3];
-    a[0] = PrepareSoundArray(Sounds[0], Sounds[1]);
-    a[1] = PrepareSoundArray(Sounds[3]);
-    a[2] = PrepareSoundArray(Sounds[2]);
+    a[0] = Plague_PrepareArray(128, Sounds[0], Sounds[1]);
+    a[1] = Plague_PrepareArray(128, Sounds[3]);
+    a[2] = Plague_PrepareArray(128, Sounds[2]);
 
     class[0] = pr_register_zombie("default", "Default", Model, ClawModel, a[0], a[1], a[2]);
     class[1] = pr_register_zombie("default2", "Default2", Model, ClawModel, a[0], a[1], a[2]);

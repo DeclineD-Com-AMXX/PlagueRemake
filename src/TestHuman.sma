@@ -17,8 +17,8 @@ static class[2];
 public plugin_precache()
 {
     new Array:a[2];
-    a[0] = PrepareSoundArray(Sounds[0], Sounds[1], Sounds[2]);
-    a[1] = PrepareSoundArray(Sounds[3], Sounds[4], Sounds[5]);
+    a[0] = Plague_PrepareArray(128, Sounds[0], Sounds[1], Sounds[2]);
+    a[1] = Plague_PrepareArray(128, Sounds[3], Sounds[4], Sounds[5]);
 
     class[0] = pr_register_human("default", "Default", Model, a[0], a[1]);
     class[1] = pr_register_human("default2", "Default2", Model, a[0], a[1]);

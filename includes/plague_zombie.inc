@@ -33,7 +33,7 @@ native pr_open_zombies_menu(id);
 
 native pr_apply_zombie_attributes(id, bool:health = true, bool:gravity = true, bool:speed = true);
 
-forward Plague_Zombiefy(id, attacker, oldrace, newrace, bool:spawn);
-forward Plague_Zombiefy_Post(id, attacker, oldrace, newrace, bool:spawn);
+forward Plague_Zombify(id, attacker, oldrace, newrace, bool:spawn);
+forward Plague_Zombify_Post(id, attacker, oldrace, newrace, bool:spawn);
 forward MenuShow: Plague_Zombie_MenuShow(id, race);
 forward Plague_Zombie_Selected(id, race);

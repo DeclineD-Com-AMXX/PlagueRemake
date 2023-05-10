@@ -1,447 +1,385 @@
-/* -> Semicolon <- */
-#pragma semicolon 1
-
-
-/* -> Includes <- */
 #include <amxmodx>
 #include <reapi>
+#include <hamsandwich>
 
 #include <plague_rounds_const>
-#include <plague>
+#include <plague_const>
 
 
-/* -> Some Macros <- */
-// #define Call->%0->Pre() \
-//     new ret; \
-//     ExecuteForward(%0[0], ret); \
-//     if(ret > _:Plague_Continue) \
-//         return
-
-// #define Call->%0->Pre(%2) \
-//     new ret; \
-//     ExecuteForward(%0[0], ret, %2); \
-//     if(ret > _:Plague_Continue) \
-//         return
-
-// #define Call->%0->Post(%2) ExecuteForward(%0[0], _, %2)
-// #define Call->%0->Post ExecuteForward(%0[0])
-
-
-/* -> Plugin Info <- */
-new const pluginName[ ] = "[Plague] Rounds & Gamemodes";
+/* -> Plugin Information <- */
+new const pluginName[ ] = "[Plague] Round Management";
 new const pluginVer[ ] = "v1.0";
 new const pluginAuthor[ ] = "DeclineD";
 
 
-/* -> Countdown <- */
-static iEnt;
-
-
-/* -> Respawn Handling <- */
-new fwdRespawn[2], fwdRespawnQueue[2];
-
-const Float:glbDefaultRespawnTime = 2.0;
-new Float: glbRespawnTime;
-
-new bool: bRespawnPending;
-
-enum ServerResData {
-           Res_Player,
-    Float: Res_Time,
-           Res_SecondsRemaining
-}
-
-new glbRespawnData[ MAX_PLAYERS + 1 ][ ServerResData ];
-new glbRespawnPos[ MAX_PLAYERS + 1 ];
-new glbRespawnCount;
+/* -> Round Start Message <- */
+new pCountdown;
 
 
 /* -> Waiting For Players <- */
-new fwdWFPEnd;
+new bool:bWFP;
 
-new cWFPMin, cWFPRestartTime, cWFPTime;
-new Float: flWFPTime;
-new bool: bWFP;
+new bool:bWFPEndNext;
+new bool:bWFPStartNext;
+
+new Float:flWFPTime;
+new iWFPMin;
+
+new cWFP, cWFPMin, cWFPTime;
 
 
-/* -> Round <- */
+/* -> Rounds <- */
+new iDelay;
+new bool:bFreezeDelay;
+
+new bool:bRoundStarted, bool:bRoundEnded;
+new Float:flRoundStart;
+
 new fwdRoundStart[2], fwdRoundEnd[2];
 new fwdFreezeEnd[2], fwdRoundStart2[2];
+new fwdCountdownStart, fwdCounted;
 
-new cpRoundTime, cRounds;
-new cpFreezeTime, cRoundEndDelay;
+new cRoundEndDelay;
 new cRoundDelay, cFreezeDelay;
 
-new iRounds, iMaxRounds;
 new GameWin: iLastWin;
-new GameWin: iGameWin;
 new WinEvent: iLastWinEvent;
-new WinEvent: iWinEvent;
-new RestartType: iLastRestart;
-new RestartType: iRestart;
 
-new SpawnType: iRespawnType;
-new InfectionType: iInfectionType;
 new RoundType: iRoundType;
 
-new RoundStartType: iStartType;
-new FreezeDelayType: iFreezeType;
-new FreezeDelayTeam: iFreezeTeam;
+public plugin_precache()
+{
+    fwdRoundStart[ 0 ] = CreateMultiForward( "Plague_RoundStart", ET_CONTINUE );
+    fwdRoundStart[ 1 ] = CreateMultiForward( "Plague_RoundStart_Post", ET_IGNORE );
 
-new iWinConditions;
+    fwdRoundStart2[ 0 ] = CreateMultiForward( "Plague_RoundStart2", ET_CONTINUE );
+    fwdRoundStart2[ 1 ] = CreateMultiForward( "Plague_RoundStart2_Post", ET_IGNORE );
 
-new bool: bRoundEnded;
-new bool: bRoundStarted;
+    fwdFreezeEnd[ 0 ] = CreateMultiForward( "Plague_OnFreezeEnd", ET_CONTINUE );
+    fwdFreezeEnd[ 1 ] = CreateMultiForward( "Plague_OnFreezeEnd_Post", ET_IGNORE );
 
-new bool: iRoundTimer;
+    fwdRoundEnd[ 0 ] = CreateMultiForward( "Plague_RoundEnd", ET_CONTINUE, FP_ARRAY );
+    fwdRoundEnd[ 1 ] = CreateMultiForward( "Plague_RoundEnd_Post", ET_IGNORE, FP_ARRAY );
 
-new iAlivePlayers[2];
+    fwdCountdownStart = CreateMultiForward( "Plague_Countdown_Start", ET_IGNORE, FP_CELL );
+    fwdCounted = CreateMultiForward( "Plague_Counted", ET_IGNORE, FP_CELL );
+}
 
-
-/* -> Gamemodes <- */
-new fwdGamemodeStart[2];
-
-new Array: aGamemodePlugin;
-new Array: aGamemodeSystemName;
-new Array: aGamemodeName;
-new Array: aGamemodeInfectionType;
-new Array: aGamemodeSpawnType;
-new Array: aGamemodeMinPlayers;
-new Array: aGamemodeChance;
-
-new iCurrentGamemode;
-new iGamemodes;
-
-const Float:glbDefaultFlSpread = 0.5;
-new Float: glbFlSpread;
-
-
-/* -> Join Game <- */
-const Task_JoinGame = 231231;
-
-
-/* -> Natives <- */
 public plugin_natives()
 {
-    // Round
-    register_native("pr_get_round_status",              "Native_RoundStatus",           1);
-
-    register_native("pr_get_last_winevent",             "Native_LastWinEvent",          1);
-    register_native("pr_get_last_restart",              "Native_LastRestart",           1);
-    register_native("pr_get_last_gamewin",              "Native_LastGameWin",           1);
-
-    register_native("pr_get_round_type",                "Native_GetRoundType",          1);
-    register_native("pr_set_round_type",                "Native_SetRoundType",          1);
-
-    register_native("pr_get_round_timer_status",        "Native_GetTimerStatus",        1);
-    register_native("pr_set_round_timer_status",        "Native_SetTimerStatus",        1);
-
-    register_native("pr_get_freeze_team",               "Native_GetFreezeTeam",         1);
-    register_native("pr_get_freeze_type",               "Native_GetFreezeType",         1);
-
-    register_native("pr_set_freeze_team",               "Native_SetFreezeTeam",         1);
-    register_native("pr_set_freeze_type",               "Native_SetFreezeType",         1);
-
-    register_native("pr_get_round_start_type",          "Native_GetRoundStartType",     1);
-    register_native("pr_set_round_start_type",          "Native_SetRoundStartType",     1);
-
-    register_native("pr_end_round",                     "Native_EndRound",              0);
-
-    // Gamemode 
-    register_native("pr_get_current_gamemode",          "Native_GetCurrentGamemode",    1);
-    register_native("pr_set_current_gamemode",          "Native_SetCurrentGamemode",    1);
-
-    register_native("pr_register_gamemode",             "Native_RegisterGamemode",      1);
-
-    register_native("pr_get_gamemode_name",             "Native_GamemodeName",          1);
-    register_native("pr_get_gamemode_id",               "Native_GamemodeId",            1);
-    register_native("pr_get_gamemodes",                 "Native_GamemodeCount",         1);
-
-    register_native("pr_get_infection_type",            "Native_GetInfectionType",      1);
-    register_native("pr_get_spawn_type",                "Native_GetSpawnType",          1);
-
-    register_native("pr_set_infection_type",            "Native_SetInfectionType",      1);
-    register_native("pr_set_spawn_type",                "Native_SetSpawnType",          1);
-
-    register_native("pr_get_spread",                    "Native_GetSpread",             1);
-    register_native("pr_reset_spread",                  "Native_ResetSpread",           1);
-    register_native("pr_set_spread",                    "Native_SetSpread",             1);
-
-    // Respawn
-    register_native("pr_add_to_respawn_queue",          "Native_AddToRespawn",          1);
-    register_native("pr_remove_from_respawn_queue",     "Native_RemoveFromRespawn",     1);
-    register_native("pr_is_user_respawning",            "Native_IsRespawning",          1);
-
-    register_native("pr_get_user_respawn_seconds_left", "Native_GetRespawnTimeLeft",    1);
-    register_native("pr_get_user_respawn_time",         "Native_GetRespawnTime",        1);
-
-    register_native("pr_set_user_respawn_seconds_left", "Native_SetRespawnTimeLeft",    1);
+    register_native("pr_end_round", "Native_EndRound");
+    register_native("pr_round_status", "Native_RoundStatus");
+    register_native("pr_get_last_win", "Native_LastWin");
+    register_native("pr_get_last_winevent", "Native_LastWinEvent");
+    register_native("pr_get_remaining_seconds", "Native_RemainingSecs");
+    register_native("pr_set_round_type", "Native_SetRoundType");
+    register_native("pr_get_round_type", "Native_GetRoundType");
+    register_native("pr_start_round", "Native_RoundStart");
 }
 
-public Native_RoundStatus()
+public plugin_init()
+{
+    // Register plugin
+    register_plugin(pluginName, pluginVer, pluginAuthor);
+
+    // Round Pre Hooks
+    RegisterHookChain(RG_RoundEnd, "RoundEnd");
+    RegisterHookChain(RG_CSGameRules_CheckWinConditions, "WinConditions");
+
+    // Round Post Hooks
+    RegisterHookChain(RG_CSGameRules_RestartRound, "RoundStart", 1);
+    RegisterHookChain(RG_CSGameRules_OnRoundFreezeEnd, "FreezeEnd", 1);
+
+    // Player Hooks
+    RegisterHookChain(RG_CBasePlayer_Spawn, "Player_Spawned", 1);
+
+    // Cvars
+    cRoundEndDelay = register_cvar("pr_round_end_delay", "3.0");
+    cRoundDelay = register_cvar("pr_round_start_delay", "1");
+    cFreezeDelay = register_cvar("pr_round_freeze_delay", "1"); 
+    cWFP = register_cvar("pr_waiting_for_players", "1");
+    cWFPMin = register_cvar("pr_wfp_minimum", "2");
+    cWFPTime = register_cvar("pr_wfp_wait_time", "20");
+
+    // Countdown Entity
+    pCountdown = rg_create_entity("info_target");
+    SetThink(pCountdown, "Countdown");
+}
+
+public plugin_cfg()
+{
+    server_cmd("exec addons/amxmodx/configs/plague.cfg");
+}
+
+public client_connect()
+{
+    iWFPMin = get_pcvar_num(cWFPMin);
+    
+    if(UTIL_CountAlive() < iWFPMin && get_pcvar_num(cWFP) > 0 && !bWFP)
+    {
+        flWFPTime = get_pcvar_float(cWFPTime);
+
+        bWFP = true;
+        bWFPStartNext = true;
+
+        flRoundStart = 0.0;
+    }
+}
+
+RoundStart2()
+{
+    new ret;
+    ExecuteForward(fwdRoundStart2[0], ret);
+
+    if(ret > _:Plague_Continue)
+        return;
+
+    get_member_game(m_iIntroRoundTime)
+    
+    bRoundStarted = true;
+
+    ExecuteForward(fwdRoundStart2[1]);
+}
+
+StartWaitingBehaviour()
+{
+    if(!bWFP)
+        return;
+
+    bRoundEnded = true;
+
+    if(bWFPStartNext)
+    {
+        if(get_member_game(m_bFreezePeriod))
+        {
+            set_member_game(m_bFreezePeriod, false);
+        }
+
+        iDelay = floatround(flWFPTime);
+
+        set_member_game(m_iRoundTimeSecs, iDelay + 3);
+        set_entvar(pCountdown, var_nextthink, flRoundStart + 1.0);
+
+        bWFPStartNext = false;
+        return;
+    }
+
+    static Float:flGametime;
+    flGametime = get_gametime();
+
+    if(flRoundStart - flGametime > flWFPTime)
+        set_member_game(m_iRoundTimeSecs, get_timeleft());
+    else
+        set_member_game(m_iRoundTimeSecs, floatround(flRoundStart + flWFPTime - flGametime));
+}
+
+StartNormalBehaviour()
+{   
+    bFreezeDelay = bool: get_pcvar_num(cFreezeDelay);
+    iDelay = get_pcvar_num(cRoundDelay);
+
+    bRoundEnded = false;
+
+    if(bFreezeDelay)
+    {
+        ExecuteForward(fwdCountdownStart, _, iDelay);
+
+        set_entvar(pCountdown, var_nextthink, flRoundStart + 1.0);
+    }
+}
+
+public RoundStart()
+{
+    if(bWFPEndNext)
+    {
+        bWFP = false;
+        set_member_game(m_bNeededPlayers, false);
+    }
+
+    if(!bWFP || (bWFP && flRoundStart == 0.0))
+        flRoundStart = get_member_game(m_fRoundStartTimeReal);
+
+    new ret;
+    ExecuteForward(fwdRoundStart[1], ret);
+
+    if(ret > _:Plague_Continue)
+        return;
+
+    if(bWFP)
+    {
+        StartWaitingBehaviour();
+        return;
+    }
+
+    StartNormalBehaviour();
+
+    ExecuteForward(fwdRoundStart[1]);
+}
+
+public FreezeEnd()
 {
     if(bWFP)
-        return RoundStatus_WaitingForPlayers;
-    
-    if(!bRoundEnded && !bRoundStarted)
-        return RoundStatus_Starting;
-
-    if(bRoundEnded)
-        return RoundStatus_Ended;
-    
-    return RoundStatus_Started;
-}
-
-public WinEvent:Native_LastWinEvent()
-{
-    return iLastWinEvent;
-}
-
-public RestartType:Native_LastRestart()
-{
-    return iLastRestart;
-}
-
-public GameWin:ative_LastGameWin()
-{
-    return iLastWin;
-}
-
-public RoundType:Native_GetRoundType()
-{
-    return iRoundType;
-}
-
-public Native_SetRoundType(RoundType:type)
-{
-    iRoundType = type;
-}
-
-public RoundTimer:Native_GetTimerStatus()
-{
-    return iRoundTimer;
-}
-
-public FreezeDelayTeam:Native_GetFreezeTeam()
-{
-    return iFreezeTeam;
-}
-
-public FreezeDelayType:Native_GetFreezeType()
-{
-    return iFreezeType;
-}
-
-public Native_SetFreezeTeam(FreezeDelayTeam:team)
-{
-    iFreezeTeam = team;
-}
-
-public Native_SetFreezeType(FreezeDelayType:type)
-{
-    iFreezeType = type;
-}
-
-public RoundStartType:Native_GetRoundStartType()
-{
-    return iStartType;
-}
-
-public Native_SetRoundStartType(RoundStartType:type)
-{
-    iStartType = type;
-}
-
-public Native_EndRound(plgId, params)
-{
-    if(params < 5)
-    {
-        log_error(AMX_ERR_NATIVE, "NOT ENOUGH PARAMS");
-        return 0;
-    }
-
-    new Float: delay = any:get_param(1),
-        WinEvent: event = any:get_param(2),
-        GameWin: win = any:get_param(3),
-        szMsg[196],
-        szSound[128];
-
-    get_string(4, szMsg, charsmax(szMsg));
-    get_string(5, szSound, charsmax(szSound));
-
-    EndRound(delay, event, win, szMsg, szSound);
-
-    return 1;
-}
-
-
-
-/* -> Private Functions <- */
-// Player Count
-CountAlivePlayers()
-{
-    iAlivePlayers[0] = iAlivePlayers[1] = 0;
-
-    for(new i = 1; i <= get_playersnum(); i++)
-        if(is_user_connected(i) && is_user_alive(i))
-            iAlivePlayers[pr_is_zombie(i) ? 0 : 1]++;
-}
-
-// Respawn
-NextRespawnSpotAvailable( )
-{
-    new i;
-    do
-    {
-        if( !glbRespawnData[ i ][ Res_Player ] )
-           return i;
-
-        i++; 
-    }
-    while( i < glbRespawnCount );
-
-    return i;
-}
-
-RemoveFromRespawnQueue( id, pos )
-{
-    // If already out of the queue exit
-    if( glbRespawnPos[ id ] == -1 )
         return;
 
-    glbRespawnPos[ id ] = -1;
-    glbRespawnData[ pos ][ Res_Player ] = 0;
-
-    glbRespawnCount--;
-}
-
-AddToRespawnQueue( id )
-{
     new ret;
-    ExecuteForward( fwdRespawnQueue[ 0 ], ret, id );
+    ExecuteForward(fwdFreezeEnd[0], ret);
 
-    if( ret > _:Plague_Stop )
+    if(ret > _:Plague_Continue)
         return;
 
-    // If already in the queue exit
-    if( glbRespawnPos[ id ] > -1 )
-        return;
+    if(!bFreezeDelay)
+    {
+        ExecuteForward(fwdCountdownStart, _, iDelay);
 
-    new pos = NextRespawnSpotAvailable( );
+        set_entvar(pCountdown, var_nextthink, flRoundStart + 1.0);
+    }
 
-    glbRespawnData[ pos ][ Res_Player ] = id;
-    glbRespawnData[ pos ][ Res_SecondsRemaining ] = floatround( glbRespawnTime );
-    glbRespawnData[ pos ][ Res_Time ] = get_gametime( ) + glbRespawnTime;
+    static iRoundTime; iRoundTime = get_member_game(m_iRoundTimeSecs);
+    static iRoundFreezeTime; iRoundFreezeTime = get_member_game(m_iIntroRoundTime);
+    iRoundFreezeTime -= iDelay + 2;
 
-    glbRespawnPos[ id ] = pos;
+    static iTime;
 
-    glbRespawnCount++;
+    if(iRoundType == Round_Infinite || iRoundType == Round_InfiniteKill)
+        iTime = get_timeleft();
+    else if(!bFreezeDelay)
+        iTime =  iRoundTime + iDelay;
+    else
+        iTime = iRoundTime + (iRoundFreezeTime > 0 ? 0 : (iRoundFreezeTime < 0 ? -iRoundFreezeTime : iDelay));
 
-    ExecuteForward( fwdRespawnQueue[ 1 ], _, id );
+    set_member_game(m_iRoundTimeSecs, iTime);
+    UTIL_RoundTime(_, iTime);
+
+    ExecuteForward(fwdFreezeEnd[1]);
 }
 
-CheckRespawning( Float: flGametime )
+HandCountWFP(Float:flGametime)
 {
-    if( !bRespawnPending )
-        return;
-    
-    new i = 1, pos = 0;
-    do
+    static PlayerNum;
+    PlayerNum = UTIL_CountAlive();
+
+    static iRemainingTime;
+    iRemainingTime = UTIL_RoundSecondsRemaining();
+
+    if(iRemainingTime <= 0 && PlayerNum >= iWFPMin)
     {
-        pos++;
+        bWFPEndNext = true;
+        UTIL_EndRound(2.0, WinEvent_WFP, Win_None);
+        return;
+    }
 
-        if( !glbRespawnData[ pos ][ Res_Player ] || 
-        !IsPlayer( glbRespawnData[ pos ][ Res_Player ] ) )
-            continue;
+    set_entvar(pCountdown, var_nextthink, flGametime + 1.0);
+}
 
-        i++;
+HandCountNormal(Float:flGametime)
+{
+    static iRemainingTime;
+    iRemainingTime = UTIL_DelayRemaining();
 
-        glbRespawnData[ pos ][ Res_SecondsRemaining ]--;
+    if(iRemainingTime <= 0)
+    {
+        RoundStart2();
+        return;
+    }
+    else ExecuteForward(fwdCounted, _, iRemainingTime);
 
-        if(glbRespawnData[ pos ][ Res_SecondsRemaining ])
-            UTIL_CenterMessage( glbRespawnData[ pos ][ Res_Player ], 
-            "You're respawning^nSeconds left: %i", glbRespawnData[ pos ][ Res_SecondsRemaining ]);
-        else
-            UTIL_CenterMessage( glbRespawnData[ pos ][ Res_Player ], 
-            "You're respawned^nYou're respawned!");
+    set_entvar(pCountdown, var_nextthink, flGametime + 1.0);
+}
 
-        if( glbRespawnData[ pos ][ Res_Time ] <= flGametime )
+public Countdown()
+{
+    static Float:flGametime;
+    flGametime = get_gametime();
+
+    if(bWFP)
+        HandCountWFP(flGametime);
+    else 
+        HandCountNormal(flGametime);
+}
+
+public Player_Spawned(id)
+{
+    if(!bWFP || !bWFPStartNext || get_member(id, m_bJustConnected) || bRoundEnded)
+        return;
+
+    bRoundEnded = true;
+    rg_round_end(2.0, WINSTATUS_NONE, ROUND_GAME_RESTART, "", "");
+}
+
+public WinConditions()
+{
+    if(bWFP)
+        return HC_CONTINUE;
+
+    if(iRoundType == Round_Infinite)
+        return HC_SUPERCEDE;
+
+    if(!bRoundStarted)
+        return HC_SUPERCEDE;
+
+    if(UTIL_CountAlive(_:TEAM_TERRORIST) == 0)
+        UTIL_EndRound(get_pcvar_float(cRoundEndDelay), WinEvent_Extermination, Win_Human);
+    else
+    if(UTIL_CountAlive(_:TEAM_CT) == 0)
+        UTIL_EndRound(get_pcvar_float(cRoundEndDelay), WinEvent_Extermination, Win_Zombie);
+
+    return HC_SUPERCEDE;
+}
+
+public RoundEnd(Float:tmDelay, ScenarioEventEndRound:event)
+{
+    if(event == ROUND_GAME_RESTART)
+        return HC_CONTINUE;
+
+    if(bWFP)
+    {
+        if(get_gametime() - flRoundStart >= flWFPTime)
         {
-            rg_round_respawn( glbRespawnData[ pos ][ Res_Player ] );
-
-            RemoveFromRespawnQueue( glbRespawnData[ pos ][ Res_Player ], pos );
-
-            continue;
+            static timeSecs; timeSecs = get_timeleft();
+            set_member_game(m_iRoundTimeSecs, timeSecs);
+            UTIL_RoundTime(_, timeSecs + 2);
         }
+
+        SetHookChainReturn(ATYPE_BOOL, false);
+        return HC_SUPERCEDE;
     }
-    while( i < glbRespawnCount && pos < MAX_PLAYERS + 1 );
-}
 
-bool: CanRespawn( id )
-{
-    if(iRespawnType == Respawn_None)
-        return false;
-
-    if(iRespawnType == Respawn_Zombie &&
-        !pr_is_zombie(id))
-        return false;
-    
-    if(iRespawnType == Respawn_Human &&
-        !pr_is_human(id))
-        return false;
-
-    return true;
-}
-
-Respawn( id )
-{
-    new ret;
-    ExecuteForward( fwdRespawn[ 0 ], ret, id );
-
-    if( ret > _:Plague_Stop )
-        return;
-
-    new iRand = random_num(0, 1);
-    if(iRespawnType == Respawn_Zombie2 ||
-        (iRespawnType == Respawn_Oppsite && pr_is_human(id)) ||
-        (iRespawnType == Respawn_Balanced && (iAlivePlayer[0] > iAlivePlayers[1])) ||
-        (iRespawnType == Respawn_Random && iRand == 0))
+    if(UTIL_RoundSecondsRemaining() <= 0 && !(iRoundType == Round_Infinite || iRoundType == Round_InfiniteKill) && !bRoundEnded)
     {
-        pr_set_user_zombie(id, true);
-    }
-    else if(iRespawnType == Respawn_Human2 ||
-        (iRespawnType == Respawn_Oppsite && pr_is_zombie(id)) ||
-        (iRespawnType == Respawn_Balanced && (iAlivePlayer[0] > iAlivePlayers[1])) ||
-        (iRespawnType == Respawn_Random && iRand == 1))
-    {
-        pr_set_user_zombie(id, false);
+        UTIL_EndRound(get_pcvar_float(cRoundEndDelay), WinEvent_Expired, Win_Draw);
     }
 
-    rg_round_respawn(id);
-
-    ExecuteForward( fwdRespawn[ 1 ], _, id );
+    SetHookChainReturn(ATYPE_BOOL, false);
+    return HC_SUPERCEDE;
 }
 
-// Round
-EndRound(Float:delay, WinEvent:event, GameWin:win, msg[], sound[])
+
+/* -> STOCKS <- */
+stock UTIL_EndRound(Float:delay, WinEvent:event, GameWin:win)
 {
-    new hmsg = PrepareArray(msg, 128);
-    new hsound = PrepareArray(sound, 128);
+    new szInfo[RoundEndInfo];
+
+    szInfo[RE_Delay] = delay;
+    szInfo[RE_Event] = event;
+    szInfo[RE_Win] = win;
+
+    new hinfo = PrepareArray(szInfo, 3, 1);
 
     new ret;
-    ExecuteForward( fwdRoundEnd[ 0 ], ret, delay, event, win, hmsg, hsound);
+    ExecuteForward( fwdRoundEnd[ 0 ], ret, hinfo);
 
-    if( ret > _:Plague_Stop )
-    {
-        ExecuteForward( fwdRoundEnd[ 1 ], _, delay, event, win, hmsg, hsound);
-        return;
-    }
+    delay = szInfo[RE_Delay];
+    event = szInfo[RE_Event];
+    win = szInfo[RE_Win];
 
-    if(iRoundType == Round_Custom)
+    if( ret > _:Plague_Continue || iRoundType == Round_Custom)
         return;
 
     bRoundEnded = true;
     bRoundStarted = false;
+
+    iLastWin = win;
+    iLastWinEvent = event;
     
     static WinStatus:win2;
     switch(win)
@@ -460,197 +398,117 @@ EndRound(Float:delay, WinEvent:event, GameWin:win, msg[], sound[])
         case WinEvent_Extermination: event2 = (win == Win_Human ? ROUND_CTS_WIN : ROUND_TERRORISTS_WIN);
     }
 
-    rg_round_end(delay, win2, event2, msg, "");
-    UTIL_PlaySound(.Sound = sound);
+    rg_round_end(delay, win2, event2, "", "");
 
-    ExecuteForward( fwdRoundEnd[ 1 ], _, delay, event, win, hmsg, hsound);
+    ExecuteForward( fwdRoundEnd[ 1 ], _, hinfo);
 }
 
-// Waiting For Players Check
-bool: IsWFP( )
+stock UTIL_CountAlive(team = 0)
 {
-    if(flWFPTime <= get_gametime())
-        return true;
+    new players[MAX_PLAYERS], num;
 
-    static NeededPlayers; NeededPlayers = get_pcvar_num(cWFPMin);
-    CountAlivePlayers();
-    if(!NeededPlayers || iAlivePlayers[0]+iAlivePlayers[1] > NeededPlayers)
-        return false;
+    if(team > 0)
+        get_players(players, num, "ae", team == 1 ? "TERRORIST" : "CT");
+    else
+        get_players(players, num, "a");
 
-    EndRound( get_pcvar_float(cWFPRestartTime), WinEvent_WFP, Win_None, "Game Commencing", "" );
-
-    return true;
+    return num;
 }
 
-// Exterminaton Check
-bool: IsExtermination( )
+stock UTIL_RoundTime(id = 0, _time)
 {
-    CountAlivePlayers();
-    if(iAlivePlayers[0] > 0 && iAlivePlayers[1] > 0)
-        return false;
+    static gmsgRoundTime;
+    if(!gmsgRoundTime) gmsgRoundTime = get_user_msgid("RoundTime");
 
-    EndRound( get_pcvar_float(cRoundEndDelay), WinEvent_Extermination, iAlivePlayers[0] > 0 ? Win_Zombie : Win_Human, "Humans Win", "" );
-
-    return true;
-}
-
-// Check Round
-bool: IsRoundTerminable( )
-{
-    if(iRoundType == Round_Infinite)
-        return false;
-
-    return true;
-}
-
-// Check Win Conditions
-__CheckWinConditions( )
-{
-    if((bWFP = IsWFP( )))
-        return;
-
-    if(!IsRoundTerminable( ))
-        return;
-
-    if(!IsExtermination( ))
-        return;
-}
-
-
-/* -> Public Functions <- */
-public plugin_precache()
-{
-    fwdRoundStart[ 0 ] = CreateMultiForward( "Plague_RoundStart", ET_CONTINUE );
-    fwdRoundStart[ 1 ] = CreateMultiForward( "Plague_RoundStart_Post", ET_IGNORED );
-
-    fwdRoundStart2[ 0 ] = CreateMultiForward( "Plague_RoundStart2", ET_CONTINUE );
-    fwdRoundStart2[ 1 ] = CreateMultiForward( "Plague_RoundStart2_Post", ET_IGNORED );
-
-    fwdFreezeEnd[ 0 ] = CreateMultiForward( "Plague_OnFreezeEnd", ET_CONTINUE );
-    fwdFreezeEnd[ 1 ] = CreateMultiForward( "Plague_OnFreezeEnd_Post", ET_IGNORED );
-
-    fwdRoundEnd[ 0 ] = CreateMultiForward( "Plague_RoundEnd", ET_CONTINUE, FP_CELL, FP_CELL, FP_CELL, FP_STRING, FP_STRING );
-    fwdRoundEnd[ 1 ] = CreateMultiForward( "Plague_RoundEnd_Post", ET_IGNORED, FP_CELL, FP_CELL, FP_CELL, FP_STRING, FP_STRING );
-
-    fwdWFPEnd = CreateMultiForward( "Plague_WaitForPlayers_End", ET_IGNORED );
-
-    fwdRespawn[ 0 ] = CreateMultiForward( "Plague_Respawn", ET_CONTINUE, FP_CELL );
-    fwdRespawn[ 1 ] = CreateMultiForward( "Plague_Respawn_Post", ET_IGNORED, FP_CELL );
-
-    fwdRespawnQueue[ 0 ] = CreateMultiForward( "Plague_EnterRespawnQueue", ET_CONTINUE, FP_CELL );
-    fwdRespawnQueue[ 1 ] = CreateMultiForward( "Plague_EnterRespawnQueue_Post", ET_IGNORED, FP_CELL );
-}
-
-public plugin_init( )
-{
-    register_plugin( pluginName, pluginVer, pluginAuthor );
-
-    register_event( "HLTV", "eventNewRound", "a", "1=0", "2=0" );
-
-    RegisterHookChain( RG_CBasePlayer_Spawn, "Spawn_Post", 1 );
-    RegisterHookChain( RG_CBasePlayer_Killed, "Death_Post", 1 );
-
-    RegisterHookChain( RG_CSGameRules_OnRoundFreezeEnd, "OnFreezeEnd_Post", 1 );
-    
-    RegisterHookChain( RG_CSGameRules_GoToIntermission, "Intermission" );
-    RegisterHookChain( RG_CSGameRules_CheckWinConditions, "CheckWinConditions" );
-    RegisterHookChain( RG_CSGameRules_FPlayerCanRespawn, "CanRespawn" );
-
-    RegisterHookChain( RG_RoundEnd, "RoundEnd" );
-
-    // Countdown Entity
-    iEnt = rg_create_entity( "info_target" );
-
-    if( is_nullent( iEnt ) )
+    if(!id)
     {
-        set_fail_state( "Couldn't create countdown entity" );
+        static players[MAX_PLAYERS], num;
+        get_players(players, num);
+        for(new i = 0; i < num; i++)
+        {
+            message_begin(MSG_ONE, gmsgRoundTime, _, players[i]);
+            write_short(_time);
+            message_end();
+        }
+
+        return;
     }
-    
-    SetThink( iEnt, "Countdown" );
-    set_entvar( iEnt, var_nextthink, get_gametime( ) + 1.0 );
 
-    bWFP = true;
+    message_begin(MSG_ONE, gmsgRoundTime, _, id);
+    write_short(_time);
+    message_end();
 }
 
-public client_connect( id )
+stock UTIL_RoundSecondsRemaining()
 {
-    glbRespawnPos[ id ] = -1;
+    static iRoundTime; iRoundTime = get_member_game(m_iRoundTimeSecs);
+    return floatround(flRoundStart + iRoundTime - get_gametime());
 }
 
-public client_disconnected( id )
+stock UTIL_DelayRemaining()
 {
-    RemoveFromRespawnQueue( id );
-
-    if(!get_playersnum())
-        flWFPTime = 0.0;
+    return floatround(flRoundStart + iDelay - get_gametime() + 1);
 }
 
-public client_putinserver(id)
+/* -> NATIVES <- */
+public Native_EndRound(plgId, params)
 {
-    set_task(0.25, "JoinGame", Task_JoinGame+id);
-
-    if(flWFPTime == 0.0)
-        flWFPTime = get_gametime() + get_cvar_float(cWFPTime);
-}
-
-public JoinGame(id)
-{
-    id -= Task_JoinGame;
-    rg_join_team(id, TEAM_SPECTATOR);
-
-    // Code to respawn as the game has started or is starting
-}
-
-// Blocking the Counter-Strike's Respawn Mechanism to replace it with our own
-public CanRespawn(id)
-{
-    SetHookChainReturn(ATYPE_BOOL, false);
-    return HC_SUPERCEDE;
-}
-
-public Spawn_Post(id)
-{
-    if(get_member(id, m_bJustConnected))
+    if(params < 5)
         return;
 
-    iAlivePlayers[pr_is_zombie(id) ? 0 : 1]++;
+    new Float:delay = get_param_f(1),
+        WinEvent:event = WinEvent:get_param(2),
+        GameWin:win = GameWin:get_param(3);
+
+    UTIL_EndRound(delay, event, win);
 }
 
-public Death_Post(id)
+public RoundStatus:Native_RoundStatus(plgId, params)
 {
-    iAlivePlayers[pr_is_zombie(id) ? 0 : 1]--;
+    if(bWFP)
+        return RoundStatus_WaitingForPlayers;
 
-    if(CanRespawn(id))
-    {
-        AddToRespawnQueue(id);
-    }
+    if(!bRoundStarted && !bRoundEnded)
+        return RoundStatus_Starting;
+
+    if(bRoundEnded)
+        return RoundStatus_Ended;
+
+    return RoundStatus_Started;
 }
 
-public CheckWinConditions()
+public GameWin:Native_LastWin()
 {
-    __CheckWinConditions();
-
-    return HC_SUPERCEDE;
+    return iLastWin;
 }
 
-public eventNewRound()
+public WinEvent:Native_LastWinEvent()
 {
-    new ret;
-    ExecuteForward( fwdRoundStart[ 0 ], ret );
+    return iLastWinEvent;
+}
 
-    if( ret > _:Plague_Continue )
+public Native_RemainingSecs()
+{
+    return UTIL_RoundSecondsRemaining() - 2;
+}
+
+public RoundType:Native_GetRoundType()
+{
+    return iRoundType;
+}
+
+public Native_SetRoundType(plgId, params)
+{
+    if(params < 1)
         return;
 
-    ExecuteForward( fwdRoundStart[ 1 ] );
+    new RoundType:i = RoundType:get_param(1);
+
+    iRoundType = i;
 }
 
-public OnFreezeEnd_Post()
+public Native_RoundStart()
 {
-    new ret;
-    ExecuteForward( fwdFreezeEnd[ 0 ], ret );
-
-    if( ret > _:Plague_Continue )
-        return;
-
-    ExecuteForward( fwdFreezeEnd[ 1 ] );
+    if(!bRoundStarted && !bRoundEnded)
+        RoundStart2();
 }

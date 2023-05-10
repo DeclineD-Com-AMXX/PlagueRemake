@@ -2,16 +2,17 @@
 
 #include <plague_human>
 #include <plague_zombie>
+#include <plague_rounds>
 
-stock Array: PrepareSoundArray(...)
+stock Array: Plague_PrepareArray(const size, ...)
 {
     if(!numargs())
         return Invalid_Array;
     
-    new string[MAX_RESOURCE_PATH_LENGTH], ch, pos, len = charsmax(string);
-    new Array: a = ArrayCreate(MAX_RESOURCE_PATH_LENGTH, 1);
+    new string[2048], ch, pos, len = charsmax(string);
+    new Array: a = ArrayCreate(size, 1);
 
-    for(new i = 0; i < numargs(); i++)
+    for(new i = 1; i < numargs(); i++)
     {
         while((pos < len) && (ch = getarg(i, pos)))
         {
@@ -27,7 +28,7 @@ stock Array: PrepareSoundArray(...)
     return a;
 }
 
-stock UTIL_CenterMessage( player = 0, const msg[ ], ... )
+stock UTIL_CenterMessage( player = 0, const msg[ ], any:... )
 {
     new szMsg[ 192 ];
     vformat( szMsg, charsmax( szMsg ), msg, 3 );
@@ -38,7 +39,7 @@ stock UTIL_CenterMessage( player = 0, const msg[ ], ... )
     static msgTextMsg;
     if( !msgTextMsg ) msgTextMsg = get_user_msgid("TextMsg");
 
-    message_begin( player ? MSG_ONE_UNRELIABLE : MSG_BROADCAST, msgTextMsg, _, player );
+    message_begin( player ? MSG_ONE_UNRELIABLE : MSG_ALL, msgTextMsg, _, player );
     write_byte( 4 );
     write_string( szMsg );
     message_end( );

@@ -13,6 +13,8 @@
 #include <plague_zombie_const>
 #include <plague_human>
 
+#include <amx_settings_api>
+
 
 /* -> Plugin Info <- */
 new const pluginName[ ] = "[Plague] Zombie Class";
@@ -114,6 +116,9 @@ enum fwds {
 }
 
 new glForwards[fwds];
+
+/* -> Settings <- */
+new const szPlgConfigsFile[ ] = "plague_zombies.ini";
 
 
 /* -> Private Functions <- */
@@ -373,7 +378,7 @@ public plugin_natives()
 {
     register_native("pr_is_zombie", "Native_IsZombie", 1);
 
-    register_native("pr_register_zombie", "Native_Register", 1);
+    register_native("pr_register_zombie", "Native_Register");
     register_native("pr_zombie_attributes", "Native_MainAttributes", 1);
     register_native("pr_zombie_races_count", "Native_Count", 1);
 
@@ -416,12 +421,29 @@ public bool: Native_IsZombie(id)
     return bZombie[id];
 }
 
-public Native_Register(sysName[], name[], model[], clawmodel[], Array: soundsHurt, Array: soundsSpawn, Array: soundsDie)
+public Native_Register(plgId, params)
 {
-    param_convert(1);
-    param_convert(2);
-    param_convert(3);
-    param_convert(4);
+    if(params < 7)
+        return -1;
+    
+    new sysName[32], 
+        name[32], 
+        model[32], 
+        clawmodel[128], 
+        Array: soundsHurt = Array: get_param(5), 
+        Array: soundsSpawn = Array: get_param(6), 
+        Array: soundsDie = Array: get_param(7);
+
+    get_string(1, sysName, charsmax(sysName));
+    get_string(2, name, charsmax(name));
+    get_string(3, model, charsmax(model));
+    get_string(4, clawmodel, charsmax(clawmodel));
+
+    if(strlen(sysName) <= 0)
+        return -1;
+
+    if(strlen(name) <= 0)
+        return -1;
 
     if(ZombieExists(sysName))
     {
@@ -430,18 +452,39 @@ public Native_Register(sysName[], name[], model[], clawmodel[], Array: soundsHur
     }
 
     ArrayPushString(ClassInfo[Zombie_SystemName], sysName);
+
+    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "NAME", name, charsmax(name)))
+        amx_save_setting_string(szPlgConfigsFile, sysName, "NAME", name);
+
     ArrayPushString(ClassInfo[Zombie_Name], name);
+
+    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "MODEL", model, charsmax(model)))
+        amx_save_setting_string(szPlgConfigsFile, sysName, "MODEL", model);
 
     precache_model(PlayerModelPath(model));
 
     ArrayPushString(ClassInfo[Zombie_Model], model);
 
+    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "CLAW_MODEL", clawmodel, charsmax(clawmodel)))
+        amx_save_setting_string(szPlgConfigsFile, sysName, "CLAW_MODEL", clawmodel);
+
     precache_model(clawmodel);
 
     ArrayPushString(ClassInfo[Zombie_ClawModel], clawmodel);
 
+    if(!amx_load_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_DIE", soundsDie))
+        amx_save_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_DIE", soundsDie);
+    
     PrecacheSoundArray(soundsDie);
+    
+    if(!amx_load_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_SPAWN", soundsSpawn))
+        amx_save_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_SPAWN", soundsSpawn);
+    
     PrecacheSoundArray(soundsSpawn);
+    
+    if(!amx_load_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_HURT", soundsHurt))
+        amx_save_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_HURT", soundsHurt);
+    
     PrecacheSoundArray(soundsHurt);
 
     ArrayPushCell(ClassInfo[Zombie_SoundsDie], soundsDie);
@@ -479,6 +522,33 @@ public Native_MainAttributes(class, hp, Float:speed, gravity, Float:kb, Float:pa
         log_error(AMX_ERR_NATIVE, "Class Id Invalid");
         return 0;
     }
+
+    new sysName[32]; ArrayGetString(ClassInfo[Zombie_SystemName], class, sysName, charsmax(sysName));
+
+    if(!amx_load_setting_int(szPlgConfigsFile, sysName, "HEALTH", hp))
+        amx_save_setting_int(szPlgConfigsFile, sysName, "HEALTH", hp);
+
+    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "SPEED_ADD", speed))
+        amx_save_setting_float(szPlgConfigsFile, sysName, "SPEED_ADD", speed);
+
+    if(!amx_load_setting_int(szPlgConfigsFile, sysName, "GRAIVTY", gravity))
+        amx_save_setting_int(szPlgConfigsFile, sysName, "GRAIVTY", gravity);
+
+    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "PAINSHOCK", painshock))
+        amx_save_setting_float(szPlgConfigsFile, sysName, "PAINSHOCK", painshock);
+
+    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "KNOCKBACK", kb))
+        amx_save_setting_float(szPlgConfigsFile, sysName, "KNOCKBACK", kb);
+
+    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "KNOCKBACK", kb))
+        amx_save_setting_float(szPlgConfigsFile, sysName, "KNOCKBACK", kb);
+
+    new szFlags[30]; get_flags(flags, szFlags, charsmax(szFlags));
+
+    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "FLAGS", szFlags, charsmax(szFlags)))
+        amx_save_setting_string(szPlgConfigsFile, sysName, "FLAGS", szFlags);
+
+    flags = read_flags(szFlags);
 
     ArraySetCell(ClassAttributes[Zombie_Health], class, hp);
     ArraySetCell(ClassAttributes[Zombie_SpeedAdd], class, speed);
@@ -859,8 +929,8 @@ public plugin_precache()
     ClassAttributes[Zombie_AttackDistance]     = ArrayCreate(1, 1);
     ClassAttributes[Zombie_Attack2Distance]    = ArrayCreate(1, 1);
 
-    glForwards[FWD_TRANSFORM] = CreateMultiForward("Plague_Zombiefy", ET_CONTINUE, FP_CELL, FP_CELL, FP_CELL, FP_CELL, FP_CELL);
-    glForwards[FWD_TRANSFORM_POST] = CreateMultiForward("Plague_Zombiefy_Post", ET_IGNORE, FP_CELL, FP_CELL, FP_CELL, FP_CELL, FP_CELL);
+    glForwards[FWD_TRANSFORM] = CreateMultiForward("Plague_Zombify", ET_CONTINUE, FP_CELL, FP_CELL, FP_CELL, FP_CELL, FP_CELL);
+    glForwards[FWD_TRANSFORM_POST] = CreateMultiForward("Plague_Zombify_Post", ET_IGNORE, FP_CELL, FP_CELL, FP_CELL, FP_CELL, FP_CELL);
     glForwards[FWD_MENU_SHOW] = CreateMultiForward("Plague_Zombie_MenuShow", ET_CONTINUE, FP_CELL, FP_CELL);
     glForwards[FWD_CLASS_SELECTED] = CreateMultiForward("Plague_Zombie_Selected", ET_CONTINUE, FP_CELL, FP_CELL);
 }

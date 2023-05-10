@@ -10,6 +10,9 @@
 
 #include <plague_const>
 #include <plague_human_const>
+#include <plague_rounds>
+
+#include <amx_settings_api>
 
 
 /* -> Plugin Info <- */
@@ -52,6 +55,9 @@ enum fwds {
 }
 
 new glForwards[fwds];
+
+/* -> Settings <- */
+new const szPlgConfigsFile[ ] = "plague_humans.ini";
 
 
 /* -> Private Functions <- */
@@ -296,7 +302,7 @@ public plugin_natives()
 {
     register_native("pr_is_human", "Native_IsHuman", 1);
 
-    register_native("pr_register_human", "Native_Register", 1);
+    register_native("pr_register_human", "Native_Register");
     register_native("pr_human_attributes", "Native_MainAttributes", 1);
     register_native("pr_human_races_count", "Native_Count", 1);
 
@@ -339,11 +345,23 @@ public bool: Native_IsHuman(id)
     return bHuman[id];
 }
 
-public Native_Register(sysName[], name[], model[], Array: soundsHurt, Array: soundsDie)
+public Native_Register(plgId, params)
 {
-    param_convert(1);
-    param_convert(2);
-    param_convert(3);
+    new sysName[32], 
+        name[32], 
+        model[32], 
+        Array: soundsHurt = Array: get_param(4), 
+        Array: soundsDie = Array: get_param(5);
+
+    get_string(1, sysName, charsmax(sysName));
+    get_string(2, name, charsmax(name));
+    get_string(3, model, charsmax(model));
+
+    if(strlen(sysName) <= 0)
+        return -1;
+
+    if(strlen(name) <= 0)
+        return -1;
 
     if(HumanExists(sysName))
     {
@@ -352,13 +370,27 @@ public Native_Register(sysName[], name[], model[], Array: soundsHurt, Array: sou
     }
 
     ArrayPushString(ClassInfo[Human_SystemName], sysName);
+
+    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "NAME", name, charsmax(name)))
+        amx_save_setting_string(szPlgConfigsFile, sysName, "NAME", name);
+
     ArrayPushString(ClassInfo[Human_Name], name);
+
+    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "MODEL", model, charsmax(model)))
+        amx_save_setting_string(szPlgConfigsFile, sysName, "MODEL", model);
 
     precache_model(PlayerModelPath(model));
 
     ArrayPushString(ClassInfo[Human_Model], model);
 
+    if(!amx_load_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_DIE", soundsDie))
+        amx_save_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_DIE", soundsDie);
+
     PrecacheSoundArray(soundsDie);
+
+    if(!amx_load_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_HURT", soundsHurt))
+        amx_save_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_HURT", soundsHurt);
+
     PrecacheSoundArray(soundsHurt);
 
     ArrayPushCell(ClassInfo[Human_SoundsDie], soundsDie);
@@ -383,14 +415,32 @@ public Native_MainAttributes(class, hp, Float:speed, gravity, Float:painshock,/*
         return 0;
     }
 
+    new sysName[32]; ArrayGetString(ClassInfo[Human_SystemName], class, sysName, charsmax(sysName));
+    
+    if(!amx_load_setting_int(szPlgConfigsFile, sysName, "HEALTH", hp))
+        amx_save_setting_int(szPlgConfigsFile, sysName, "HEALTH", hp);
+
+    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "SPEED_ADD", speed))
+        amx_save_setting_float(szPlgConfigsFile, sysName, "SPEED_ADD", speed);
+
+    if(!amx_load_setting_int(szPlgConfigsFile, sysName, "GRAVITY", gravity))
+        amx_save_setting_int(szPlgConfigsFile, sysName, "GRAVITY", gravity);
+
+    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "PAINSHOCK", painshock))
+        amx_save_setting_float(szPlgConfigsFile, sysName, "PAINSHOCK", painshock);
+
+    new szFlags[30]; get_flags(flags, szFlags, charsmax(szFlags));
+
+    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "FLAGS", szFlags, charsmax(szFlags)))
+        amx_save_setting_string(szPlgConfigsFile, sysName, "FLAGS", szFlags);
+
+    flags = read_flags(szFlags);
+
     ArraySetCell(ClassAttributes[Human_Health], class, hp);
     ArraySetCell(ClassAttributes[Human_SpeedAdd], class, speed);
     ArraySetCell(ClassAttributes[Human_Gravity], class, gravity);
     ArraySetCell(ClassAttributes[Human_Painshock], class, painshock);
-    //ArrayPushCell(ClassAttributes[Human_ArmorResistance], armorRes);
-    //ArrayPushCell(ClassAttributes[Human_ArmorDamage], armorDmg);
     ArraySetCell(ClassAttributes[Human_Flags], class, flags);
-    //ArrayPushCell(ClassAttributes[Human_Selectable], select);
 
     return 1;
 }
