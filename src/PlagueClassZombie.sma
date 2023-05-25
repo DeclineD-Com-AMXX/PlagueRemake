@@ -1,8 +1,4 @@
-/* -> Semicolon <- */
-#pragma semicolon 1
-
-
-/* -> Includes <- */
+/* *[-> INCLUDES <-]* */
 #include <amxmodx>
 #include <amxmisc>
 #include <hamsandwich>
@@ -10,18 +6,24 @@
 #include <xs>
 
 #include <plague_const>
+#include <plague_human_const>
 #include <plague_zombie_const>
-#include <plague_human>
+#include <plague_armor>
+#include <plague_classes>
+#include <plague_settings>
 
-#include <amx_settings_api>
-
-
-/* -> Plugin Info <- */
-new const pluginName[ ] = "[Plague] Zombie Class";
-new const pluginVer[ ] = "v1.0";
+/* *[-> PLUGIN INFO <-]* */
+new const pluginName[ ] = "[Plague] Class Zombie";
+new const pluginVersion[ ] = "Final";
 new const pluginAuthor[ ] = "DeclineD";
 
+/* *[-> DEFINES <-]* */
+#define IsZombie(%0) bool:(pr_get_user_class(%0) == ZombieClassId)
+#define IsHuman(%0) bool:(pr_get_user_class(%0) == HumanClassId)
+#define IsPlayer(%0) is_user_connected(%0)
+#define PlayerModelPath(%0) fmt("models/player/%s/%s.mdl", %0, %0)
 
+/* *[-> SETTINGS <-]* */
 /* -> Default Knife Time <- */
 const Float: flKnifeAttack1Time = 0.4;
 const Float: flKnifeAttack1Miss = 0.35;
@@ -29,1021 +31,673 @@ const Float: flKnifeAttack1Miss = 0.35;
 const Float: flKnifeAttack2Time = 1.1;
 const Float: flKnifeAttack2Miss = 1.0;
 
-
-/* -> Cvars <- */
 enum _:plgcvars {
-    PC_KBPOWER,
-    PC_KBVERTICAL,
-    PC_KBON,
-    PC_KBCLASS,
-    PC_KBDUCK,
-    PC_KBDISTANCE,
-    PC_KBDAMAGE
+    any: PC_KBPOWER,
+    any: PC_KBVERTICAL,
+    any: PC_KBON,
+    any: PC_KBCLASS,
+    any: PC_KBDUCK,
+    any: PC_KBDISTANCE,
+    any: PC_KBDAMAGE
 };
 
 new glbCvars[plgcvars];
+new any: glbCvarValues[plgcvars];
 
-
-/* -> Knockback <- */
 new Float:kb_weapon_power[] = 
 {
-	-1.0,	// ---
-	1.2,	// P228
-	-1.0,	// ---
-	3.5,	// SCOUT
-	-1.0,	// ---
-	4.0,	// XM1014
-	-1.0,	// ---
-	1.3,	// MAC10
-	2.5,	// AUG
-	-1.0,	// ---
-	1.2,	// ELITE
-	1.0,	// FIVESEVEN
-	1.2,	// UMP45
-	2.25,	// SG550
-	2.25,	// GALIL
-	2.25,	// FAMAS
-	1.1,	// USP
-	1.0,	// GLOCK18
-	2.5,	// AWP
-	1.25,	// MP5NAVY
-	2.25,	// M249
-	4.0,	// M3
-	2.5,	// M4A1
-	1.2,	// TMP
-	3.25,	// G3SG1
-	-1.0,	// ---
-	2.15,	// DEAGLE
-	2.5,	// SG552
-	3.0,	// AK47
-	-1.0,	// ---
-	1.0,	// P90
-	-1.0 // ---
+    -1.0,	// ---
+    1.2,	// P228
+    -1.0,	// ---
+    3.5,	// SCOUT
+    -1.0,	// ---
+    4.0,	// XM1014
+    -1.0,	// ---
+    1.3,	// MAC10
+    2.5,	// AUG
+    -1.0,	// ---
+    1.2,	// ELITE
+    1.0,	// FIVESEVEN
+    1.2,	// UMP45
+    2.25,	// SG550
+    2.25,	// GALIL
+    2.25,	// FAMAS
+    1.1,	// USP
+    1.0,	// GLOCK18
+    2.5,	// AWP
+    1.25,	// MP5NAVY
+    5.0,	// M249
+    4.0,	// M3
+    2.5,	// M4A1
+    1.2,	// TMP
+    3.25,	// G3SG1
+    -1.0,	// ---
+    2.15,	// DEAGLE
+    2.5,	// SG552
+    3.0,	// AK47
+    -1.0,	// KNIFE
+    1.0,	// P90
+    -1.0    // SHIELD GUN
 };
 
+new const pluginCfg[] = "addons/amxmodx/configs/plague.json";
 
-/* -> Client <- */
-#define IsPlayer(%0) ( ( 0 < %0 ) && ( %0 <= MAX_PLAYERS ) && is_user_connected(%0) )
-#define IsPlayerId(%0) ( ( 0 < %0 ) && ( %0 <= MAX_PLAYERS ) )
-#define PlayerModelPath(%0) fmt("models/player/%s/%s.mdl", %0, %0)
+new const szDataKeys[ ZombieData ][ ] = {
+    "name", "model", "claw_model", "hurt_sounds", "spawn_sounds", "death_sounds", "health",
+    "gravity", "speed", "knockback", "painshock", "flags", "show_menu",
+    "attk_dmg", "attk2_dmg", "attk_delay_attk", "attk_delay_attk2",
+    "attk2_delay_attk", "attk2_delay_attk2", "attk_delay_miss_attk",
+    "attk_delay_miss_attk2", "attk2_delay_miss_attk", "attk2_delay_miss_attk2",
+    "attk_distance", "attk2_distance"
+};
 
-new bool: bZombie[ MAX_PLAYERS + 1 ];
-
-new iClass[ MAX_PLAYERS + 1 ];
-new iNextClass[ MAX_PLAYERS + 1 ];
-
-
-/* -> Class <- */
-#define ValidRace(%0) ( ( 0 <= %0 ) && ( %0 < iClassCount ) )
-#define ValidInfo(%0) ( ( ZombieInformation:0 <= %0 ) && %0 < ZombieInformation )
-#define ValidAttribute(%0) ( ( ZombieAttributes:0 <= %0 ) && %0 < ZombieAttributes )
-
-new iClassCount;
-
-new ClassInfo[ZombieInformation];
-new ClassAttributes[ZombieAttributes];
-
-// new UserClassInfo[MAX_PLAYERS + 1][ZombieInformation];
-// new UserClassAttributes[MAX_PLAYERS + 1][ZombieAttributes];
-
-
-/* -> Forwards <- */
-enum fwds {
-    FWD_TRANSFORM,
-    FWD_TRANSFORM_POST,
-    FWD_MENU_SHOW,
-    FWD_CLASS_SELECTED
+new const szDataDefault[ ZombieData ][] = {
+    "default", "terror", "models/v_knife", "player/bhit_flesh-1.wav", "", "player/die1.wav", "100",
+    "800", "250.0", "0.5", "0.5", "", "2",
+    "0.0", "0.0", "0.0", "0.0",
+    "0.0", "0.0", "0.0",
+    "0.0", "0.0", "0.0",
+    "0.0", "0.0"
 }
 
-new glForwards[fwds];
+new JSON:ZombieSection = Invalid_JSON, JSON:RaceSection = Invalid_JSON;
 
-/* -> Settings <- */
-new const szPlgConfigsFile[ ] = "plague_zombies.ini";
+new iRaceCount;
+new Trie:tZombies, Array:aZombieSystemName, Array:aZombieData[ ZombieData ];
 
+new Array:aZombiePlgLoaded;
 
-/* -> Private Functions <- */
-ZombieExists(sysName[])
+new bool:bReg = true;
+
+LoadRaces( )
 {
-    new szName[32];
-    for(new i = 0; i < iClassCount; i++)
-    {
-        ArrayGetString(ClassInfo[Zombie_SystemName], i, szName, charsmax(szName));
-
-        if(equal(szName, sysName))
-            return 1;
-    }
-
-    return 0;
-}
-
-PrecacheSoundArray(Array:sound)
-{
-    static szSound[MAX_RESOURCE_PATH_LENGTH];
-    for(new i = 0; i < ArraySize(sound); i++)
-    {
-        ArrayGetString(sound, i, szSound, charsmax(szSound));
-        precache_sound(szSound);
-    }
-}
-
-bool: CanUseClass(id, class, bool:ignoreFlags)
-{
-    if(ignoreFlags)
-        return true;
-
-    new flags = 0;
-    flags = ArrayGetCell(ClassAttributes[Zombie_Flags], class);
-
-    if(flags <= 0)
-        return true;
-
-    if((get_user_flags(id) & flags) == flags)
-        return true;
-
-    return false;
-}
-
-FirstAvailableClass(id)
-{
-    for(new i = 0; i < iClassCount; i++)
-    {
-        if(CanUseClass(id, i, false))
-            return i;    
-    }
-
-    return 0;
-}
-
-TransformNotice(id, attacker)
-{
-    static iDeathMsg, iScoreAttrib;
-    if(!iDeathMsg) iDeathMsg = get_user_msgid("DeathMsg");
-    if(!iScoreAttrib) iScoreAttrib = get_user_msgid("ScoreAttrib");
-
-    message_begin(MSG_BROADCAST, iDeathMsg);
-    write_byte(attacker);
-    write_byte(id);
-    write_byte(0);//write_byte(human(id) ? 0 : 1);
-    write_string("worldspawn");//write_string(human(id) ? "worldspawn" : "teammate");
-    message_end();
-
-    message_begin(MSG_BROADCAST, iScoreAttrib);
-    write_byte(id);
-    write_byte(0);
-    message_end();
-}
-
-MakeZombie(id, attacker, bool:spawn, bool:flags, bool:health)
-{
-    new oldclass = iClass[id];
-
-    new ret;
-    ExecuteForward(glForwards[FWD_TRANSFORM_POST], ret, id, attacker, iClass[id], iNextClass[id], spawn);
-
-    if(ret > _:Plague_Continue)
-        return;
-
-    if(iNextClass[id] != iClass[id])
-    {
-        if(!CanUseClass(id, iNextClass[id], flags))
-            iNextClass[id] = iClass[id];
-        else
-            iClass[id] = iNextClass[id];
-    }
-
-    if(is_user_alive(id)) {
-        for(new i = 1; i <= MAX_ITEM_TYPES; i++)
-            rg_remove_items_by_slot(id, any:i);
-        
-        rg_give_item(id, "weapon_knife");
-
-        new szModel[32];
-        ArrayGetString(ClassInfo[Zombie_Model], iClass[id], szModel, charsmax(szModel));
-        rg_set_user_model(id, szModel, true);
-
-        ArrayGetString(ClassInfo[Zombie_ClawModel], iClass[id], szModel, charsmax(szModel));
-        set_entvar(id, var_viewmodel, szModel);
-        set_entvar(id, var_weaponmodel, "");
-
-        if(health)
-        {
-            new hp = ArrayGetCell(ClassAttributes[Zombie_Health], iClass[id]);
-            set_entvar(id, var_health, float(hp));
-            set_entvar(id, var_max_health, float(hp));
-        }
-
-        if(spawn)
-        {
-            new Array: a = ArrayGetCell(ClassInfo[Zombie_SoundsSpawn], iClass[id]);
-
-            if(a > Invalid_Array)
-            {
-                new rand = random_num(0, ArraySize(a)-1);
-
-                new szSound[MAX_RESOURCE_PATH_LENGTH];
-                ArrayGetString(a, rand, szSound, charsmax(szSound));
-
-                emit_sound(id, CHAN_VOICE, szSound, VOL_NORM, ATTN_NORM, 0, PITCH_NORM);
-            }
-        }
-
-        new gravity = ArrayGetCell(ClassAttributes[Zombie_Gravity], iClass[id]);
-        set_entvar(id, var_gravity, float(gravity)/800.0);
-
-        ExecuteHamB(Ham_CS_Player_ResetMaxSpeed, id);
-
-        if(attacker > -1)
-            TransformNotice(id, attacker);
-    }
-
-    set_member(id, m_iTeam, TEAM_TERRORIST);
-    rg_set_user_team(id, TEAM_TERRORIST);
-
-    ExecuteForward(glForwards[FWD_TRANSFORM_POST], ret, id, attacker, oldclass, iNextClass[id], spawn);
-}
-
-Transform(id, bool:zombie, attacker, bool:spawn, bool:flags, bool:health)
-{
-    if(!IsPlayer(id))
-    {
-        log_message("%i not connected", id);
-        return 0;
-    }
-
-    if(zombie)
-        MakeZombie(id, attacker, spawn, flags, health);
-
-    bZombie[id] = zombie;
-    pr_set_user_human(id, !zombie, attacker, spawn, flags, health);
-
-    return 1;
-}
-
-bool: CanShow(id, class)
-{
-    new MenuShow: show = ArrayGetCell(ClassAttributes[Zombie_MenuShow], class);
-    
-    if(show == MenuShow_No)
-        return false;
-
-    if(show == MenuShow_Custom)
-    {
-        new ret;
-        ExecuteForward(glForwards[FWD_MENU_SHOW], ret, id, class);
-
-        show = MenuShow: ret;
-    }
-
-    if(show == MenuShow_Flag)
-    {
-        new flags = ArrayGetCell(ClassAttributes[Zombie_Flags], class);
-
-        return bool:((get_user_flags(id) & flags) == flags);
-    }
-
-    return true;
-}
-
-RaceMenu(id)
-{
-    if(iClassCount <= 1)
+    if ( !bReg )
         return;
     
-    new menu = menu_create("Zombie Classes", "RaceHandler");
-
-    new szFormat[128], szName[32];
-
-    for(new i = 0; i < iClassCount; i++)
+    if ( ZombieSection == Invalid_JSON )
     {
-        if(!CanShow(id, i))
+        ZombieSection = json_object_get_object_safe( pr_open_settings( pluginCfg ), PClass_Zombie );
+        RaceSection = json_object_get_object_safe( ZombieSection, "races" );
+    }
+
+    new x, any:y, size, JSON:temp, JSON:temp2;
+    new szSound[ 64 ], szString[ 32 ], any:value;
+    new Array:aTemp, id, szFlags[ 30 ], szClaw[ 128 ];
+
+    for ( x = 0; x < json_object_get_count( RaceSection ); x++ )
+    {
+        json_object_get_name( RaceSection, x, szString, charsmax( szString ) );
+
+        if ( TrieKeyExists( tZombies, szString ) )
             continue;
         
-        ArrayGetString(ClassInfo[Zombie_Name], i, szName, charsmax(szName));
-        formatex(szFormat, charsmax(szFormat), "%s%s", (iNextClass[id] == i ? "\d" : ""), szName);
-        menu_additem(menu, szFormat, fmt("%i", i));
-    }
+        id = iRaceCount;
+        AddRace( false, szString, szSound, szClaw, szString, Invalid_Array, Invalid_Array, Invalid_Array, 0, 0, 0.0, 0.0, 0.0, 0, MenuShow_No);
 
-    menu_display(id, menu);
-}
+        temp = json_object_get_object_at_safe( RaceSection, x );
 
-ChatSelectionInfo(id)
-{
-    new szName[32];
-    new hp = ArrayGetCell(ClassAttributes[Zombie_Health], iNextClass[id]),
-        gravity = ArrayGetCell(ClassAttributes[Zombie_Gravity], iNextClass[id]),
-        Float: speed = ArrayGetCell(ClassAttributes[Zombie_SpeedAdd], iNextClass[id]),
-        Float: kb = ArrayGetCell(ClassAttributes[Zombie_Knockback], iNextClass[id]);
+        temp2 = json_object_get_string_safe( temp, szDataKeys[ Zombie_Name ], szDataDefault[ Zombie_Name ], szString, charsmax( szString ) );
+        ArraySetString( aZombieData[ Zombie_Name ], id, szString );
+        json_free( temp2 );
 
-    ArrayGetString(ClassInfo[Zombie_Name], iNextClass[id], szName, charsmax(szName));
+        temp2 = json_object_get_string_safe( temp, szDataKeys[ Zombie_Model ], szDataDefault[ Zombie_Model ], szString, charsmax( szString ) );
+        ArraySetString( aZombieData[ Zombie_Model ], id, szString );
+        json_free( temp2 );
 
-    client_print_color(id, 0, "^x04[ZP] ^x01Next infection your ^x03zombie race ^x01will be: ^x04%s.", szName);
-    client_print_color(id, 0, "^x04[ZP] ^x01Health: ^x04%i ^x03| ^x01Gravity: ^x04%i ^x03| ^x01Speed: ^x04%.2f ^x03| ^x01Knockback: ^x04%.2f%%^x01.", hp, gravity, 250.0 + speed, kb*100.0);
-}
+        precache_model( PlayerModelPath( szString ) );
 
-public RaceHandler(id, menu, item)
-{
-    if(item == MENU_EXIT)
-    {
-        menu_destroy(menu);
-        return;
-    }
+        temp2 = json_object_get_string_safe( temp, szDataKeys[ Zombie_ClawModel ], szDataDefault[ Zombie_ClawModel ], szString, charsmax( szString ) );
+        ArraySetString( aZombieData[ Zombie_ClawModel ], id, szString );
+        json_free( temp2 );
 
-    new szDesc[3];
-    menu_item_getinfo(menu, item, _, szDesc, charsmax(szDesc));
+        precache_model( szString );
 
-    new class = str_to_num(szDesc);
+        aTemp = ArrayCreate( 64, 1 );
 
-    new ret;
-    ExecuteForward(glForwards[FWD_CLASS_SELECTED], ret, id, class);
+        temp2 = json_object_get_array_safe( temp, szDataKeys[ Zombie_DeathSounds ] );
+        size = json_array_get_count( temp2 );
 
-    if(ret == _:Plague_Stop)
-    {
-        menu_display(id, menu);
-        return;
-    }
-
-    menu_destroy(menu);
-
-    if(ret == _:Plague_Handled)
-        return;
-
-    iNextClass[id] = class;
-
-    ChatSelectionInfo(id);
-}
-
-
-/* -> Natives <- */
-public plugin_natives()
-{
-    register_native("pr_is_zombie", "Native_IsZombie", 1);
-
-    register_native("pr_register_zombie", "Native_Register");
-    register_native("pr_zombie_attributes", "Native_MainAttributes", 1);
-    register_native("pr_zombie_races_count", "Native_Count", 1);
-
-    register_native("pr_next_available_zombie_race", "Native_NextAvailable", 1);
-
-    register_native("pr_get_zombie_users_count", "Native_Users", 1);
-    register_native("pr_set_user_zombie", "Native_SetZombie", 1);
-
-    register_native("pr_set_user_zombie_race", "Native_SetRace", 1);
-    register_native("pr_get_user_zombie_race", "Native_GetRace", 1);
-
-    register_native("pr_set_user_next_zombie_race", "Native_SetNextRace", 1);
-    register_native("pr_get_user_next_zombie_race", "Native_GetNextRace", 1);
-
-    register_native("pr_get_zombie_race_info", "Native_GetInfo");
-    register_native("pr_set_zombie_race_info", "Native_SetInfo");
-
-    register_native("pr_get_zombie_race_attribute", "Native_GetAttr");
-    register_native("pr_set_zombie_race_attribute", "Native_SetAttr");
-
-    register_native("pr_open_zombies_menu", "Native_ZombiesMenu", 1);
-
-    register_native("pr_apply_zombie_attributes", "Native_ApplyAttr", 1);
-
-    /* Future Updates
-     * --------------
-     * Change Zombie Class Info and Attributes
-     * for one or more users.
-     */
-
-    // register_native("pr_get_user_zombie_race_info", "Native_GetUserInfo");
-    // register_native("pr_set_user_zombie_race_info", "Native_SetUserInfo");
-
-    // register_native("pr_get_user_zombie_race_attribute", "Native_GetUserAttr");
-    // register_native("pr_set_user_zombie_race_attribute", "Native_SetUserAttr");
-}
-
-public bool: Native_IsZombie(id)
-{
-    return bZombie[id];
-}
-
-public Native_Register(plgId, params)
-{
-    if(params < 7)
-        return -1;
-    
-    new sysName[32], 
-        name[32], 
-        model[32], 
-        clawmodel[128], 
-        Array: soundsHurt = Array: get_param(5), 
-        Array: soundsSpawn = Array: get_param(6), 
-        Array: soundsDie = Array: get_param(7);
-
-    get_string(1, sysName, charsmax(sysName));
-    get_string(2, name, charsmax(name));
-    get_string(3, model, charsmax(model));
-    get_string(4, clawmodel, charsmax(clawmodel));
-
-    if(strlen(sysName) <= 0)
-        return -1;
-
-    if(strlen(name) <= 0)
-        return -1;
-
-    if(ZombieExists(sysName))
-    {
-        log_message("CLASS EXISTS %s", sysName);
-        return -1;
-    }
-
-    ArrayPushString(ClassInfo[Zombie_SystemName], sysName);
-
-    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "NAME", name, charsmax(name)))
-        amx_save_setting_string(szPlgConfigsFile, sysName, "NAME", name);
-
-    ArrayPushString(ClassInfo[Zombie_Name], name);
-
-    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "MODEL", model, charsmax(model)))
-        amx_save_setting_string(szPlgConfigsFile, sysName, "MODEL", model);
-
-    precache_model(PlayerModelPath(model));
-
-    ArrayPushString(ClassInfo[Zombie_Model], model);
-
-    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "CLAW_MODEL", clawmodel, charsmax(clawmodel)))
-        amx_save_setting_string(szPlgConfigsFile, sysName, "CLAW_MODEL", clawmodel);
-
-    precache_model(clawmodel);
-
-    ArrayPushString(ClassInfo[Zombie_ClawModel], clawmodel);
-
-    if(!amx_load_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_DIE", soundsDie))
-        amx_save_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_DIE", soundsDie);
-    
-    PrecacheSoundArray(soundsDie);
-    
-    if(!amx_load_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_SPAWN", soundsSpawn))
-        amx_save_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_SPAWN", soundsSpawn);
-    
-    PrecacheSoundArray(soundsSpawn);
-    
-    if(!amx_load_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_HURT", soundsHurt))
-        amx_save_setting_string_arr(szPlgConfigsFile, sysName, "SOUNDS_HURT", soundsHurt);
-    
-    PrecacheSoundArray(soundsHurt);
-
-    ArrayPushCell(ClassInfo[Zombie_SoundsDie], soundsDie);
-    ArrayPushCell(ClassInfo[Zombie_SoundsSpawn], soundsSpawn);
-    ArrayPushCell(ClassInfo[Zombie_SoundsPain], soundsHurt);
-
-    ArrayPushCell(ClassAttributes[Zombie_Health], 100);
-    ArrayPushCell(ClassAttributes[Zombie_SpeedAdd], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_Gravity], 800);
-    ArrayPushCell(ClassAttributes[Zombie_Painshock], 1.0);
-    ArrayPushCell(ClassAttributes[Zombie_Knockback], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_Flags], 0);
-    ArrayPushCell(ClassAttributes[Zombie_MenuShow], MenuShow_Yes);
-    ArrayPushCell(ClassAttributes[Zombie_AttackDamage], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_Attack2Damage], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_AttackDelay], 0.0); 
-    ArrayPushCell(ClassAttributes[Zombie_AttackDelay2], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_Attack2Delay], 0.0); 
-    ArrayPushCell(ClassAttributes[Zombie_Attack2Delay1], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_AttackDelayMiss], 0.0); 
-    ArrayPushCell(ClassAttributes[Zombie_AttackDelayMiss2], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_Attack2DelayMiss], 0.0); 
-    ArrayPushCell(ClassAttributes[Zombie_Attack2DelayMiss1], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_AttackDistance], 0.0);
-    ArrayPushCell(ClassAttributes[Zombie_Attack2Distance], 0.0);
-
-    iClassCount++;
-    return iClassCount - 1;
-}
-
-public Native_MainAttributes(class, hp, Float:speed, gravity, Float:kb, Float:painshock, flags)
-{
-    if(!ValidRace(class))
-    {
-        log_error(AMX_ERR_NATIVE, "Class Id Invalid");
-        return 0;
-    }
-
-    new sysName[32]; ArrayGetString(ClassInfo[Zombie_SystemName], class, sysName, charsmax(sysName));
-
-    if(!amx_load_setting_int(szPlgConfigsFile, sysName, "HEALTH", hp))
-        amx_save_setting_int(szPlgConfigsFile, sysName, "HEALTH", hp);
-
-    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "SPEED_ADD", speed))
-        amx_save_setting_float(szPlgConfigsFile, sysName, "SPEED_ADD", speed);
-
-    if(!amx_load_setting_int(szPlgConfigsFile, sysName, "GRAIVTY", gravity))
-        amx_save_setting_int(szPlgConfigsFile, sysName, "GRAIVTY", gravity);
-
-    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "PAINSHOCK", painshock))
-        amx_save_setting_float(szPlgConfigsFile, sysName, "PAINSHOCK", painshock);
-
-    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "KNOCKBACK", kb))
-        amx_save_setting_float(szPlgConfigsFile, sysName, "KNOCKBACK", kb);
-
-    if(!amx_load_setting_float(szPlgConfigsFile, sysName, "KNOCKBACK", kb))
-        amx_save_setting_float(szPlgConfigsFile, sysName, "KNOCKBACK", kb);
-
-    new szFlags[30]; get_flags(flags, szFlags, charsmax(szFlags));
-
-    if(!amx_load_setting_string(szPlgConfigsFile, sysName, "FLAGS", szFlags, charsmax(szFlags)))
-        amx_save_setting_string(szPlgConfigsFile, sysName, "FLAGS", szFlags);
-
-    flags = read_flags(szFlags);
-
-    ArraySetCell(ClassAttributes[Zombie_Health], class, hp);
-    ArraySetCell(ClassAttributes[Zombie_SpeedAdd], class, speed);
-    ArraySetCell(ClassAttributes[Zombie_Gravity], class, gravity);
-    ArraySetCell(ClassAttributes[Zombie_Painshock], class, painshock);
-    ArraySetCell(ClassAttributes[Zombie_Knockback], class, kb);
-    ArraySetCell(ClassAttributes[Zombie_Flags], class, flags);
-
-    return 1;
-}
-
-public Native_Count()
-{
-    return iClassCount;
-}
-
-
-public Native_Users(bool: alive)
-{
-    static num;
-    for(new i = 1; i <= MAX_PLAYERS; i++)
-    {
-        if(bZombie[i] && ((alive && is_user_alive(i)) || (!alive && !is_user_alive(i))))
-            num++;
-    }
-
-    return num;
-}
-
-
-public Native_NextAvailable(id)
-{
-    return FirstAvailableClass(id);
-}
-
-public Native_SetZombie(id, bool:zombie, attacker, bool:spawn, bool:flags, bool:health)
-{
-    if(!IsPlayer(id))
-    {
-        log_error(AMX_ERR_NATIVE, "CLIENT INVALID");
-        return 0;
-    }
-
-    Transform(id, zombie, attacker, spawn, flags, health);
-
-    return 1;
-}
-
-public Native_SetRace(id, race)
-{
-    if(!IsPlayer(id))
-    {
-        log_error(AMX_ERR_NATIVE, "CLIENT INVALID");
-        return 0;
-    }
-
-    if(!ValidRace(race))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID RACE ID");
-        return 0;
-    }
-
-    iNextClass[id] = race;
-
-    if(bZombie[id])
-        Transform(id, true, -1, true, false, true);
-
-    return 1;
-}
-
-public Native_GetRace(id)
-{
-    if(!IsPlayerId(id))
-    {
-        log_error(AMX_ERR_NATIVE, "CLIENT INVALID");
-        return 0;
-    }
-
-    return iClass[id];
-}
-
-public Native_SetNextRace(id, race)
-{
-    if(!IsPlayerId(id))
-    {
-        log_error(AMX_ERR_NATIVE, "CLIENT INVALID");
-        return 0;
-    }
-
-    if(!ValidRace(race))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID RACE ID");
-        return 0;
-    }
-
-    iNextClass[id] = race;
-
-    return 1;
-}
-
-public Native_GetNextRace(id)
-{
-    if(!IsPlayerId(id))
-    {
-        log_error(AMX_ERR_NATIVE, "CLIENT INVALID");
-        return 0;
-    }
-    
-    return iNextClass[id];
-}
-
-public any:Native_GetInfo(plgId, argc)
-{
-    if(argc < 2)
-    {
-        log_error(AMX_ERR_NATIVE, "NOT ENOUGH PARAMS");
-        return 0;
-    }
-
-    new class = get_param(1);
-
-    if(!ValidRace(class))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID RACE ID");
-        return 0;
-    }
-
-    new ZombieInformation: id = ZombieInformation: get_param(2);
-
-    if(!ValidInfo(id))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID ZOMBIE INFORMATION ID");
-        return 0;
-    }
-
-    switch(id)
-    {
-        case Zombie_SystemName:
+        if ( size )
         {
-            log_error(AMX_ERR_NATIVE, "SYSTEM NAME CANNOT BE CHANGED");
-            return 0;
-        }
-
-        case Zombie_Name, Zombie_Model, Zombie_ClawModel:
-        {
-            if(argc < 4)
+            for ( y = 0; y < size; y++ )
             {
-                log_error(AMX_ERR_NATIVE, "NOT ENOUGH PARAMS");
-                return 0;
+                json_array_get_string( temp2, y, szSound, charsmax( szSound ) );
+                precache_sound( szSound );
+                ArrayPushString( aTemp, szSound );
             }
-
-            new szString[32];
-            ArrayGetString(any:ClassInfo[id], class, szString, charsmax(szString));
-
-            set_string(3, szString, get_param(4));
-
-            return 1;
+        }
+        else {
+            json_array_append_string( temp2, szDataDefault[ Zombie_DeathSounds ] );
+            precache_sound( szDataDefault[ Zombie_DeathSounds ] );
+            ArrayPushString( aTemp, szDataDefault[ Zombie_DeathSounds ] );
         }
 
-        default:
+        ArraySetCell( aZombieData[ Zombie_DeathSounds ], id, aTemp );
+        json_free( temp2 );
+
+        aTemp = ArrayCreate( 64, 1 );
+
+        temp2 = json_object_get_array_safe( temp, szDataKeys[ Zombie_SpawnSounds ] );
+        size = json_array_get_count( temp2 );
+
+        if ( size )
         {
-            return ArrayGetCell(any:ClassInfo[id], class);
-        }
-    }
-
-    return 1;
-}
-
-public any:Native_SetInfo(plgId, argc)
-{
-    if(argc < 3)
-    {
-        log_error(AMX_ERR_NATIVE, "NOT ENOUGH PARAMS");
-        return 0;
-    }
-
-    new class = get_param(1);
-
-    if(!ValidRace(class))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID RACE ID");
-        return 0;
-    }
-
-    new ZombieInformation: id = ZombieInformation: get_param(2);
-
-    if(!ValidInfo(id))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID ZOMBIE INFORMATION ID");
-        return 0;
-    }
-
-    switch(id)
-    {
-        case Zombie_SystemName:
-        {
-            log_error(AMX_ERR_NATIVE, "SYSTEM NAME CANNOT BE CHANGED");
-            return 0;
-        }
-
-        case Zombie_Name, Zombie_Model, Zombie_ClawModel:
-        {
-            new szString[32];
-            get_string(3, szString, charsmax(szString));
-
-            ArraySetString(any:ClassInfo[id], class, szString);
-        }
-
-        default:
-        {
-            ArraySetCell(any:ClassInfo[id], class, get_param(3));
-        }
-    }
-
-    return 1;
-}
-
-public any:Native_GetAttr(plgId, argc)
-{
-    if(argc < 2)
-    {
-        log_error(AMX_ERR_NATIVE, "NOT ENOUGH PARAMS");
-        return 0;
-    }
-
-    new class = get_param(1);
-
-    if(!ValidRace(class))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID RACE ID");
-        return 0;
-    }
-
-    new ZombieAttributes: id = ZombieAttributes: get_param(2);
-
-    if(!ValidAttribute(id))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID ZOMBIE ATTRIBUTE ID");
-        return 0;
-    }
-
-    switch(id)
-    {
-        case Zombie_Health,
-            Zombie_Gravity,
-            Zombie_Flags,
-            Zombie_MenuShow:
-        {
-            return ArrayGetCell(any:ClassAttributes[id], class);
-        }
-
-        default:
-        {
-            if(argc == 3)
+            for ( y = 0; y < size; y++ )
             {
-                new Float: flValue = ArrayGetCell(any:ClassAttributes[id], class);
-                set_float_byref(3, flValue);
+                json_array_get_string( temp2, y, szSound, charsmax( szSound ) );
+                precache_sound( szSound );
+                ArrayPushString( aTemp, szSound );
             }
-            else return ArrayGetCell(any:ClassAttributes[id], class);
         }
-    }
+        else {
+            json_array_append_string( temp2, szDataDefault[ Zombie_SpawnSounds ] );
+            precache_sound( szDataDefault[ Zombie_SpawnSounds ] );
+            ArrayPushString( aTemp, szDataDefault[ Zombie_SpawnSounds ] );
+        }
 
-    return 1;
-}
+        ArraySetCell( aZombieData[ Zombie_SpawnSounds ], id, aTemp );
+        json_free( temp2 );
 
-public any:Native_SetAttr(plgId, argc)
-{
-    if(argc < 3)
-    {
-        log_error(AMX_ERR_NATIVE, "NOT ENOUGH PARAMS");
-        return 0;
-    }
+        temp2 = json_object_get_array_safe( temp, szDataKeys[ Zombie_HurtSounds ] );
+        size = json_array_get_count( temp2 );
 
-    new class = get_param(1);
+        aTemp = ArrayCreate( 64, 1 );
 
-    if(!ValidRace(class))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID RACE ID");
-        return 0;
-    }
-
-    new ZombieAttributes: id = ZombieAttributes: get_param(2);
-
-    if(!ValidAttribute(id))
-    {
-        log_error(AMX_ERR_NATIVE, "INVALID ZOMBIE ATTRIBUTE ID");
-        return 0;
-    }
-
-    switch(id)
-    {
-        case Zombie_Health,
-            Zombie_Gravity,
-            Zombie_Flags,
-            Zombie_MenuShow:
+        if ( size )
         {
-            new value = get_param(3);
-            ArraySetCell(any:ClassAttributes[id], class, value);
+            for ( y = 0; y < size; y++ )
+            {
+                json_array_get_string( temp2, y, szSound, charsmax( szSound ) );
+                precache_sound( szSound );
+                ArrayPushString( aTemp, szSound );
+            }
+        }
+        else {
+            json_array_append_string( temp2, szDataDefault[ Zombie_HurtSounds ] );
+            precache_sound( szDataDefault[ Zombie_HurtSounds ] );
+            ArrayPushString( aTemp, szDataDefault[ Zombie_HurtSounds ] );
         }
 
-        default:
+        ArraySetCell( aZombieData[ Zombie_HurtSounds ], id, aTemp );
+        json_free( temp2 );
+
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Health ], szDataDefault[ Zombie_Health ], JSONNumber, value );
+        ArraySetCell( aZombieData[ Zombie_Health ], id, value );
+        json_free( temp2 );
+
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Gravity ], szDataDefault[ Zombie_Gravity ], JSONNumber, value );
+        ArraySetCell( aZombieData[ Zombie_Gravity ], id, value );
+        json_free( temp2 );
+
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Speed ], szDataDefault[ Zombie_Speed ], JSONNumber, value );
+        ArraySetCell( aZombieData[ Zombie_Speed ], id, value );
+        json_free( temp2 );
+
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Knockback ], szDataDefault[ Zombie_Knockback ], JSONNumber, value );
+        ArraySetCell( aZombieData[ Zombie_Knockback ], id, value );
+        json_free( temp2 );
+
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Painshock ], szDataDefault[ Zombie_Painshock ], JSONNumber, value );
+        ArraySetCell( aZombieData[ Zombie_Painshock ], id, value );
+        json_free( temp2 );
+
+        temp2 = json_object_get_string_safe( temp, szDataKeys[ Zombie_Flags ], "", szFlags, charsmax( szFlags ) );
+        value = read_flags( szFlags );
+        ArraySetCell( aZombieData[ Zombie_Flags ], id, value );
+        json_free( temp2 );
+
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_MenuShow ], szDataDefault[ Zombie_MenuShow ], JSONNumber, value );
+        ArraySetCell( aZombieData[ Zombie_MenuShow ], id, value );
+        json_free( temp2 );
+
+        for(y = Zombie_AttackDamage; y < ZombieData; y++)
         {
-            new Float: flValue = get_param_f(3);
-            ArraySetCell(any:ClassAttributes[id], class, flValue);
+            temp2 = json_object_get_value_safe( temp, szDataKeys[ y ], szDataDefault[ y ], JSONNumber, value );
+            ArraySetCell( aZombieData[ y ], id, value );
+            json_free( temp2 );
         }
-    }
 
-    return 1;
+        json_free( temp );
+    }
 }
 
-public Native_ApplyAttr(id, bool:hp, bool:gravity, bool:speed)
+LoadRace( szSysName[ 32 ], szName[ 64 ], szClaw[ 128 ], szModel[ 32 ], Array:dSounds, Array:sSounds, Array:pSounds, 
+            health, gravity, Float:speed, Float:painshock, Float:kb, flags, MenuShow:menuShow )
 {
-    if(!IsPlayer(id))
+    if ( !bReg )
+        return -1;
+    
+    if ( ZombieSection == Invalid_JSON )
     {
-        log_error(AMX_ERR_NATIVE, "INVALID CLIENT");
-        return 0;
+        ZombieSection = json_object_get_object_safe( pr_open_settings( pluginCfg ), PClass_Zombie );
+        RaceSection = json_object_get_object_safe( ZombieSection, "races" );
     }
 
-    if(!bZombie[id])
-        return 0;
-
-    if(hp)
+    new id;
+    if ( !TrieKeyExists( tZombies, szSysName ) )
     {
-        new hp = ArrayGetCell(ClassAttributes[Zombie_Health], iClass[id]);
-        set_entvar(id, var_health, float(hp));
-        set_entvar(id, var_max_health, float(hp));
+        new any:y, size, JSON:temp, JSON:temp2, any:value;
+
+        new szFlags[ 30 ], szSound[ 64 ];
+
+        id = iRaceCount;
+        AddRace( true, szSysName, szName, szClaw, szModel, Invalid_Array, Invalid_Array, Invalid_Array, 0, 0, 0.0, 0.0, 0.0, 0, MenuShow_No);
+
+        temp = json_object_get_object_safe( RaceSection, szSysName );
+
+        temp2 = json_object_get_string_safe( temp, szDataKeys[ Zombie_Name ], szName, szName, charsmax( szName ) );
+        ArraySetString( aZombieData[ Zombie_Name ], id, szName );
+        json_free( temp2 );
+
+        temp2 = json_object_get_string_safe( temp, szDataKeys[ Zombie_Model ], szModel, szModel, charsmax( szModel ) );
+        ArraySetString( aZombieData[ Zombie_Model ], id, szModel );
+        json_free( temp2 );
+
+        precache_model( PlayerModelPath( szModel ) );
+
+        temp2 = json_object_get_string_safe( temp, szDataKeys[ Zombie_ClawModel ], szClaw, szClaw, charsmax( szClaw ) );
+        ArraySetString( aZombieData[ Zombie_ClawModel ], id, szClaw );
+        json_free( temp2 );
+
+        precache_model( szClaw );
+
+        if ( dSounds == Invalid_Array )
+           dSounds = ArrayCreate( 64, 1 );
+
+        if ( pSounds == Invalid_Array )
+           pSounds = ArrayCreate( 64, 1 );
+        
+        if ( sSounds == Invalid_Array )
+           sSounds = ArrayCreate( 64, 1 );
+
+        temp2 = json_object_get_array_safe( temp, szDataKeys[ Zombie_DeathSounds ] );
+        size = json_array_get_count( temp2 );
+
+        if ( size )
+        {
+            ArrayClear( dSounds );
+
+            for ( y = 0; y < size; y++ )
+            {
+                json_array_get_string( temp2, y, szSound, charsmax( szSound ) );
+                precache_sound( szSound );
+                ArrayPushString( dSounds, szSound );
+            }
+        }
+        else {
+            for ( y = 0; y < ArraySize( dSounds ); y++ )
+            {
+                ArrayGetString( dSounds, y, szSound, charsmax( szSound ) );
+                json_array_append_string( temp2, szSound );
+                precache_sound( szSound );
+            }
+        }
+
+        ArraySetCell( aZombieData[ Zombie_DeathSounds ], id, dSounds );
+        json_free( temp2 );
+
+        temp2 = json_object_get_array_safe( temp, szDataKeys[ Zombie_SpawnSounds ] );
+        size = json_array_get_count( temp2 );
+
+        if ( size )
+        {
+            ArrayClear( sSounds );
+
+            for ( y = 0; y < size; y++ )
+            {
+                json_array_get_string( temp2, y, szSound, charsmax( szSound ) );
+                precache_sound( szSound );
+                ArrayPushString( sSounds, szSound );
+            }
+        }
+        else {
+            for ( y = 0; y < ArraySize( sSounds ); y++ )
+            {
+                ArrayGetString( sSounds, y, szSound, charsmax( szSound ) );
+                json_array_append_string( temp2, szSound );
+                precache_sound( szSound );
+            }
+        }
+
+        ArraySetCell( aZombieData[ Zombie_SpawnSounds ], id, sSounds );
+        json_free( temp2 );
+
+        temp2 = json_object_get_array_safe( temp, szDataKeys[ Zombie_HurtSounds ] );
+        size = json_array_get_count( temp2 );
+
+        if ( size )
+        {
+            ArrayClear( pSounds );
+
+            for ( y = 0; y < size; y++ )
+            {
+                json_array_get_string( temp2, y, szSound, charsmax( szSound ) );
+                precache_sound( szSound );
+                ArrayPushString( pSounds, szSound );
+            }
+        }
+        else {
+            for ( y = 0; y < ArraySize( pSounds ); y++ )
+            {
+                ArrayGetString( pSounds, y, szSound, charsmax( szSound ) );
+                json_array_append_string( temp2, szSound );
+                precache_sound( szSound );
+            }
+        }
+
+        ArraySetCell( aZombieData[ Zombie_HurtSounds ], id, pSounds );
+        json_free( temp2 );
+
+        formatex(szSound, charsmax(szSound), "%i", health);
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Health ], szSound, JSONNumber, health );
+        ArraySetCell( aZombieData[ Zombie_Health ], id, health );
+        json_free( temp2 );
+
+        formatex(szSound, charsmax(szSound), "%i", gravity);
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Gravity ], szDataDefault[ Zombie_Gravity ], JSONNumber, gravity );
+        ArraySetCell( aZombieData[ Zombie_Gravity ], id, gravity );
+        json_free( temp2 );
+
+        formatex(szSound, charsmax(szSound), "%f", speed);
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Speed ], szDataDefault[ Zombie_Speed ], JSONNumber, speed );
+        ArraySetCell( aZombieData[ Zombie_Speed ], id, speed );
+        json_free( temp2 );
+
+        formatex(szSound, charsmax(szSound), "%f", kb);
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Knockback ], szDataDefault[ Zombie_Knockback ], JSONNumber, kb );
+        ArraySetCell( aZombieData[ Zombie_Knockback ], id, kb );
+        json_free( temp2 );
+
+        formatex(szSound, charsmax(szSound), "%f", painshock);
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_Painshock ], szDataDefault[ Zombie_Painshock ], JSONNumber, painshock );
+        ArraySetCell( aZombieData[ Zombie_Painshock ], id, painshock );
+        json_free( temp2 );
+
+        get_flags( flags, szFlags, charsmax( szFlags ) );
+        temp2 = json_object_get_string_safe( temp, szDataKeys[ Zombie_Flags ], "", szFlags, charsmax( szFlags ) );
+        flags = read_flags( szFlags );
+        ArraySetCell( aZombieData[ Zombie_Flags ], id, flags );
+        json_free( temp2 );
+
+        formatex(szSound, charsmax(szSound), "%i", menuShow);
+        temp2 = json_object_get_value_safe( temp, szDataKeys[ Zombie_MenuShow ], szDataDefault[ Zombie_MenuShow ], JSONNumber, menuShow );
+        ArraySetCell( aZombieData[ Zombie_MenuShow ], id, menuShow );
+        json_free( temp2 );
+
+        for(y = Zombie_AttackDamage; y < ZombieData; y++)
+        {
+            temp2 = json_object_get_value_safe( temp, szDataKeys[ y ], szDataDefault[ y ], JSONNumber, value );
+            ArraySetCell( aZombieData[ y ], id, value );
+            json_free( temp2 );
+        }
+
+        json_free( temp );
+    }
+    else {
+        TrieGetCell( tZombies, szSysName, id );
+
+        if ( ArrayGetCell( aZombiePlgLoaded, id ) == true )
+            return -1;
+
+        ArraySetCell( aZombiePlgLoaded, id, true );
     }
 
-    if(gravity)
-    {
-        new gravity = ArrayGetCell(ClassAttributes[Zombie_Gravity], iClass[id]);
-        set_entvar(id, var_gravity, float(gravity)/800.0);
-    }
-
-    if(speed)
-    {
-        ExecuteHamB(Ham_CS_Player_ResetMaxSpeed, id);
-    }
-
-    return 1;
+    return id;
 }
 
-public Native_ZombiesMenu(id)
+AddRace( bool: plg, szSysName[ 32 ], szName[ 64 ], szClaw[ 128 ], szModel[ 32 ], Array:dSounds, Array:sSounds, Array:pSounds, 
+            health, gravity, Float:speed, Float:painshock, Float:kb, flags, MenuShow:menuShow )
 {
-    RaceMenu(id);
+    TrieSetCell( tZombies, szSysName, iRaceCount );
+    ArrayPushString( aZombieSystemName, szSysName );
+    ArrayPushCell( aZombiePlgLoaded, plg );
+
+    ArrayPushString( aZombieData[ Zombie_Name ], szName );
+    ArrayPushString( aZombieData[ Zombie_Model ], szModel );
+    ArrayPushString( aZombieData[ Zombie_ClawModel ], szClaw );
+    ArrayPushCell( aZombieData[ Zombie_DeathSounds ], dSounds );
+    ArrayPushCell( aZombieData[ Zombie_SpawnSounds ], sSounds );
+    ArrayPushCell( aZombieData[ Zombie_HurtSounds ], pSounds );
+    ArrayPushCell( aZombieData[ Zombie_Health ], health );
+    ArrayPushCell( aZombieData[ Zombie_Gravity ], gravity );
+    ArrayPushCell( aZombieData[ Zombie_Speed ], speed );
+    ArrayPushCell( aZombieData[ Zombie_Painshock ], painshock );
+    ArrayPushCell( aZombieData[ Zombie_Knockback ], kb );
+
+    ArrayPushCell( aZombieData[ Zombie_Flags ], flags );
+    
+    ArrayPushCell( aZombieData[ Zombie_MenuShow ], menuShow );
+
+    for(new any:i = Zombie_AttackDamage; i < ZombieData; i++)
+        ArrayPushCell( aZombieData[ i ], 0.0 );
+
+    iRaceCount++;
 }
 
+/* *[-> VARIABLES <-]* */
+new PlagueClassId: HumanClassId;
+new PlagueClassId: ZombieClassId;
 
-/* -> Plugin Functions <- */
-public plugin_precache()
+new iRace[ MAX_PLAYERS + 1 ];
+new iNextRace[ MAX_PLAYERS + 1 ];
+
+new fwdZombify, fwdZombified;
+new fwdShow;
+new fwdChoose, fwdChoosePost;
+
+/* *[-> PLUGIN <-]* */
+public plugin_precache( )
 {
-    ClassInfo[Zombie_SystemName]               = ArrayCreate(32, 1);
-    ClassInfo[Zombie_Name]                     = ArrayCreate(32, 1);
-    ClassInfo[Zombie_Model]                    = ArrayCreate(32, 1);
-    ClassInfo[Zombie_ClawModel]                = ArrayCreate(128, 1);
-    ClassInfo[Zombie_SoundsPain]               = ArrayCreate(1, 1);
-    ClassInfo[Zombie_SoundsSpawn]              = ArrayCreate(1, 1);
-    ClassInfo[Zombie_SoundsDie]                = ArrayCreate(1, 1);
+    ZombieClassId = pr_register_class( PClass_Zombie, TEAM_TERRORIST );
 
-    ClassAttributes[Zombie_Health]             = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_SpeedAdd]           = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_Gravity]            = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_Painshock]          = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_Knockback]          = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_Flags]              = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_MenuShow]           = ArrayCreate(1, 1);
+    tZombies = TrieCreate( );
+    aZombieSystemName = ArrayCreate( 32, 1 );
+    aZombiePlgLoaded = ArrayCreate( 1, 1 );
+    
+    aZombieData[ Zombie_Name ] = ArrayCreate( 64, 1 );
+    aZombieData[ Zombie_Model ] = ArrayCreate( 32, 1 );
+    aZombieData[ Zombie_ClawModel ] = ArrayCreate( 128, 1 );
+    aZombieData[ Zombie_DeathSounds ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_SpawnSounds ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_HurtSounds ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_Health ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_Gravity ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_Speed ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_Painshock ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_Knockback ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_Flags ] = ArrayCreate( 1, 1 );
+    aZombieData[ Zombie_MenuShow ] = ArrayCreate( 1, 1 );
 
-    ClassAttributes[Zombie_AttackDamage]       = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_Attack2Damage]      = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_AttackDelay]        = ArrayCreate(1, 1); 
-    ClassAttributes[Zombie_AttackDelay2]       = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_Attack2Delay]       = ArrayCreate(1, 1); 
-    ClassAttributes[Zombie_Attack2Delay1]      = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_AttackDelayMiss]    = ArrayCreate(1, 1); 
-    ClassAttributes[Zombie_AttackDelayMiss2]   = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_Attack2DelayMiss]   = ArrayCreate(1, 1); 
-    ClassAttributes[Zombie_Attack2DelayMiss1]  = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_AttackDistance]     = ArrayCreate(1, 1);
-    ClassAttributes[Zombie_Attack2Distance]    = ArrayCreate(1, 1);
+    for(new ZombieData:i = Zombie_AttackDamage; i < ZombieData; i++)
+        aZombieData[ i ] = ArrayCreate( 1, 1 );
 
-    glForwards[FWD_TRANSFORM] = CreateMultiForward("Plague_Zombify", ET_CONTINUE, FP_CELL, FP_CELL, FP_CELL, FP_CELL, FP_CELL);
-    glForwards[FWD_TRANSFORM_POST] = CreateMultiForward("Plague_Zombify_Post", ET_IGNORE, FP_CELL, FP_CELL, FP_CELL, FP_CELL, FP_CELL);
-    glForwards[FWD_MENU_SHOW] = CreateMultiForward("Plague_Zombie_MenuShow", ET_CONTINUE, FP_CELL, FP_CELL);
-    glForwards[FWD_CLASS_SELECTED] = CreateMultiForward("Plague_Zombie_Selected", ET_CONTINUE, FP_CELL, FP_CELL);
+    LoadRaces( );
+
+    fwdZombify = CreateMultiForward( "Plague_Zombify", ET_CONTINUE, FP_CELL, FP_CELL, FP_CELL );
+    fwdZombified = CreateMultiForward( "Plague_Zombified", ET_CONTINUE, FP_CELL, FP_CELL, FP_CELL );
+    fwdShow = CreateMultiForward( "Plague_ShowZombieInMenu", ET_CONTINUE, FP_CELL, FP_CELL );
+    fwdChoose = CreateMultiForward( "Plague_ChooseZombieRace", ET_CONTINUE, FP_CELL, FP_CELL );
+    fwdChoosePost = CreateMultiForward( "Plague_ChooseZombieRace_Post", ET_IGNORE, FP_CELL, FP_CELL );
 }
 
-public plugin_init()
+public plugin_natives( )
 {
-    register_plugin(pluginName, pluginVer, pluginAuthor);
+    register_native( "pr_register_zombie_race", "Native_RegRace" );
+
+    register_native( "pr_get_zombie_race_count", "Native_RaceCount", 1 );
+
+    register_native( "pr_first_available_zombie_race", "Native_FirstAvailable" );
+
+    register_native( "pr_get_user_zombie_race", "Native_GetRace" );
+    register_native( "pr_set_user_zombie_race", "Native_SetRace" );
+
+    register_native( "pr_get_user_next_zombie_race", "Native_GetNextRace" );
+    register_native( "pr_set_user_next_zombie_race", "Native_SetNextRace" );
+
+    register_native( "pr_set_zombie_data", "Native_SetZombieData" );
+    register_native( "pr_get_zombie_data", "Native_GetZombieData" );
+
+    register_native( "pr_open_zombies_menu", "Native_ZombiesMenu" );
+
+    register_native( "pr_reset_zombie_attributes", "Native_ResetAttr", 1 );
+}
+
+public plugin_init( )
+{
+    bReg = false;
+
+    // End of Settings
+    json_free( ZombieSection );
+    json_free( RaceSection );
+
+    pr_close_settings( pluginCfg );
+
+    // plugin
+    register_plugin( pluginName, pluginVersion, pluginAuthor );
+
+    HumanClassId = pr_get_class_id( PClass_Human );
+
+    RegisterHookChain( RG_CBasePlayer_Pain, "ReHook_CBasePlayer_Pain", 1 );
+    RegisterHookChain( RG_CBasePlayer_DeathSound, "ReHook_CBasePlayer_Death", 1 );
+
+    RegisterHookChain( RG_CBasePlayer_TakeDamage, "ReHook_CBasePlayer_TakeDamage" );
+    RegisterHookChain( RG_CBasePlayer_TakeDamage, "ReHook_CBasePlayer_TakeDamage_Post", 1 );
+
+    RegisterHookChain( RG_CBasePlayer_AddPlayerItem, "ReHook_CBasePlayer_AddPlayerItem_Post", 1);
+    RegisterHookChain( RG_CSGameRules_GiveC4, "C4");
 
     glbCvars[PC_KBPOWER] = register_cvar("plague_knockback_power", "1");
-    glbCvars[PC_KBON] = register_cvar("plague_knockback_on", "1");
-    glbCvars[PC_KBCLASS] = register_cvar("plague_knockback_class", "1");
-    glbCvars[PC_KBVERTICAL] = register_cvar("plague_knockback_vertical", "1");
-    glbCvars[PC_KBDUCK] = register_cvar("plague_knockback_duck_reduction", "0.25");
-    glbCvars[PC_KBDISTANCE] = register_cvar("plague_knockback_max_distance", "750.0");
+    glbCvarValues[PC_KBPOWER] = 1;
+    bind_pcvar_num(glbCvars[PC_KBPOWER], glbCvarValues[PC_KBPOWER]);
 
-    RegisterHookChain(RG_CBasePlayer_TakeDamage, "TakeDamage_Post", 1);
-    RegisterHookChain(RG_CBasePlayer_TraceAttack, "TraceAttack_Post", 1);
-    RegisterHookChain(RG_CBasePlayer_Pain, "Pain");
-    RegisterHookChain(RG_CBasePlayer_DeathSound, "DeathSound");
+    glbCvars[PC_KBON] = register_cvar("plague_knockback_on", "1");
+    glbCvarValues[PC_KBON] = 1;
+    bind_pcvar_num(glbCvars[PC_KBON], glbCvarValues[PC_KBON]);
+
+    glbCvars[PC_KBCLASS] = register_cvar("plague_knockback_class", "1");
+    glbCvarValues[PC_KBCLASS] = 1;
+    bind_pcvar_num(glbCvars[PC_KBCLASS], glbCvarValues[PC_KBCLASS]);
+
+    glbCvars[PC_KBVERTICAL] = register_cvar("plague_knockback_vertical", "1");
+    glbCvarValues[PC_KBVERTICAL] = 1;
+    bind_pcvar_num(glbCvars[PC_KBVERTICAL], glbCvarValues[PC_KBVERTICAL]);
+
+    glbCvars[PC_KBDAMAGE] = register_cvar("plague_knockback_damage", "1");
+    glbCvarValues[PC_KBDAMAGE] = 1;
+    bind_pcvar_num(glbCvars[PC_KBDAMAGE], glbCvarValues[PC_KBDAMAGE]);
+
+    glbCvars[PC_KBDUCK] = register_cvar("plague_knockback_duck_reduction", "0.25");
+    glbCvarValues[PC_KBDUCK] = 1;
+    bind_pcvar_float(glbCvars[PC_KBDUCK], glbCvarValues[PC_KBDUCK]);
+
+    glbCvars[PC_KBDISTANCE] = register_cvar("plague_knockback_max_distance", "750.0");
+    glbCvarValues[PC_KBDISTANCE] = 1;
+    bind_pcvar_float(glbCvars[PC_KBDISTANCE], glbCvarValues[PC_KBDISTANCE]);
+
+    RegisterHam(Ham_TraceAttack, "player", "TraceAttack_Post", 1);
 
     RegisterHam(Ham_Item_Deploy, "weapon_knife", "Hands_Post", 1);
     RegisterHam(Ham_Weapon_PrimaryAttack, "weapon_knife", "HandsAttack1_Post", 1);
     RegisterHam(Ham_Weapon_SecondaryAttack, "weapon_knife", "HandsAttack2_Post", 1);
-    RegisterHam(Ham_Spawn, "player", "Player_Spawn_Post", 1);
 
-    RegisterHam(Ham_CS_Player_ResetMaxSpeed, "player", "ResetSpeed_Post", 1);
+    // Can t use turrets or weapons
+    RegisterHam(Ham_Use, "func_tank", "fw_UseStationary");
+    RegisterHam(Ham_Use, "func_tankmortar", "fw_UseStationary");
+    RegisterHam(Ham_Use, "func_tankrocket", "fw_UseStationary");
+    RegisterHam(Ham_Use, "func_tanklaser", "fw_UseStationary");
+    RegisterHam(Ham_Use, "func_tank", "fw_UseStationary_Post", 1);
+    RegisterHam(Ham_Use, "func_tankmortar", "fw_UseStationary_Post", 1);
+    RegisterHam(Ham_Use, "func_tankrocket", "fw_UseStationary_Post", 1);
+    RegisterHam(Ham_Use, "func_tanklaser", "fw_UseStationary_Post", 1);
+    RegisterHam(Ham_Touch, "weaponbox", "fw_TouchWeapon");
+    RegisterHam(Ham_Touch, "armoury_entity", "fw_TouchWeapon");
+    RegisterHam(Ham_Touch, "weapon_shield", "fw_TouchWeapon");
 
-    register_clcmd("say /zm", "cmdZm");
-    register_clcmd("say /zombie", "cmdZomb");
+    RegisterHookChain(RG_CBasePlayer_ResetMaxSpeed, "ResetSpeed_Post", 1);
 }
 
-public client_connect(id)
-{
-    bZombie[id] = false;
-}
+public C4() return HC_SUPERCEDE;
 
-public cmdZm(id)
+public ReHook_CBasePlayer_AddPlayerItem_Post( pPlayer, pItem )
 {
-    RaceMenu(id);
-}
-
-public cmdZomb(id)
-{
-    Transform(id, !bZombie[id], 0, true, false, true);
-}
-
-public Player_Spawn_Post(id)
-{
-    if(get_member(id, m_bJustConnected) || !bZombie[id])
+    new any:id;
+    if ( is_nullent( pItem ) || ( (id = get_member( pItem, m_iId ) ) > WeaponIdType || id <= WEAPON_NONE ) )
         return;
-
-    Transform(id, true, -1, true, false, true);
-}
-
-public TakeDamage_Post(id, inflictor, attacker, Float: flDamage, dmgBits)
-{
-    if(id == attacker || !bZombie[id] || bZombie[attacker])
-        return;
-
-    new Float: flPainshock = ArrayGetCell(ClassAttributes[Zombie_Painshock], iClass[id]);
-
-    set_member(id, m_flVelocityModifier, flPainshock);
-}
-
-public Pain(id)
-{
-    if(!bZombie[id])
-        return HC_CONTINUE;
     
-    new Array: a = ArrayGetCell(ClassInfo[Zombie_SoundsPain], iClass[id]);
-
-    if(a == Invalid_Array)
-        return HC_CONTINUE;
-
-    new rand = random_num(0, ArraySize(a)-1);
-
-    new szSound[MAX_RESOURCE_PATH_LENGTH];
-    ArrayGetString(a, rand, szSound, charsmax(szSound));
-
-    emit_sound(id, CHAN_VOICE, szSound, VOL_NORM, ATTN_NORM, 0, PITCH_NORM);
-
-    return HC_SUPERCEDE;
+    set_entvar( pItem, var_fuser4, kb_weapon_power[ id ] );
 }
 
-public DeathSound(id)
+public plugin_end( )
 {
-    if(!bZombie[id])
-        return HC_CONTINUE;
-    
-    new Array: a = ArrayGetCell(ClassInfo[Zombie_SoundsDie], iClass[id]);
+    if ( ZombieSection != Invalid_JSON )
+        json_free( ZombieSection );
 
-    if(a == Invalid_Array)
-        return HC_CONTINUE;
+    if ( RaceSection != Invalid_JSON )
+        json_free( RaceSection );
 
-    new rand = random_num(0, ArraySize(a)-1);
+    TrieDestroy( tZombies );
+    ArrayDestroy( aZombieSystemName );
 
-    new szSound[MAX_RESOURCE_PATH_LENGTH];
-    ArrayGetString(a, rand, szSound, charsmax(szSound));
+    new any:i, x, Array:a;
+    for ( i = 0; i < ZombieData; i++ )
+    {
+        if ( i == Zombie_DeathSounds || i == Zombie_HurtSounds )
+        {
+            for ( x = 0; x < iRaceCount; x++ )
+            {
+                a = Array:ArrayGetCell( aZombieData[ i ], x )
+                ArrayDestroy( a );
+            }
+        }
 
-    emit_sound(id, CHAN_VOICE, szSound, VOL_NORM, ATTN_NORM, 0, PITCH_NORM);
+        ArrayDestroy( aZombieData[ i ] );
+    }
+}
 
-    return HC_SUPERCEDE;
+/* *[-> NOWHERE TO PUT SHIT <-]* */
+
+// Weapon and turret handling
+public fw_UseStationary(entity, caller, activator, use_type)
+{
+	if (use_type == 2 && is_user_connected(caller) && IsZombie(caller))
+		return HAM_SUPERCEDE;
+	
+	return HAM_IGNORED;
+}
+
+public fw_UseStationary_Post(entity, caller, activator, use_type)
+{
+	if(use_type == 0 && is_user_connected(caller) && IsZombie(caller))
+	{
+		// Reset Claws
+		static Claw2[128];
+		ArrayGetString(aZombieData[Zombie_ClawModel], iRace[caller], Claw2, charsmax(Claw2));
+			
+		set_entvar(caller, var_viewmodel, Claw2);
+		set_entvar(caller, var_weaponmodel, "");	
+	}
+}
+
+public fw_TouchWeapon(weapon, id)
+{
+	if(!is_user_connected(id))
+		return HAM_IGNORED;
+
+	if(IsZombie(id))
+		return HAM_SUPERCEDE;
+	
+	return HAM_IGNORED;
 }
 
 public ResetSpeed_Post(id)
 {
-    if(!bZombie[id])
+    if(!IsZombie(id) || get_member_game(m_bFreezePeriod))
         return;
 
-    new Float: flSpeed = ArrayGetCell(ClassAttributes[Zombie_SpeedAdd], iClass[id]);
+    new Float: flSpeed = ArrayGetCell(aZombieData[Zombie_Speed], iRace[id]);
 
     new Float: maxspeed = get_entvar(id, var_maxspeed);
-    maxspeed += flSpeed;
+    maxspeed += (flSpeed - 250.0);
 
     set_entvar(id, var_maxspeed, maxspeed);
 }
@@ -1051,77 +705,57 @@ public ResetSpeed_Post(id)
 public TraceAttack_Post(victim, attacker, Float:flDamage, Float:vecDir[3], tr, dmgBits)
 {
     if((victim == attacker) ||
-    bZombie[attacker] || 
-    pr_is_human(victim) ||
-    !IsPlayer(victim) || 
-    !IsPlayer(attacker) ||
-    (~dmgBits & DMG_BULLET) ||
-    (~dmgBits & DMG_SLASH) ||
-    get_pcvar_num(glbCvars[PC_KBON]) <= 0)
+        IsZombie(attacker) || 
+        IsHuman(victim) ||
+        !IsPlayer(victim) || 
+        !IsPlayer(attacker) )
         return;
 
-    static bool:bPower; bPower = bool:get_pcvar_num(glbCvars[PC_KBPOWER]);
-    static bool:bClass; bClass = bool:get_pcvar_num(glbCvars[PC_KBCLASS]);
-    static bool:bVertical; bVertical = bool:get_pcvar_num(glbCvars[PC_KBVERTICAL]);
-    static bool:bDamage; bDamage = bool:get_pcvar_num(glbCvars[PC_KBDAMAGE]);
-    static Float: flDuck; flDuck = get_pcvar_float(glbCvars[PC_KBDUCK]);
-    static Float: flDistance; flDistance = get_pcvar_float(glbCvars[PC_KBDISTANCE]);
+    new flags = get_entvar(victim, var_flags);
+    new bool:bDuck = ((flags & FL_DUCKING) && (flags & FL_ONGROUND));
 
-    static Float: vecOrigin[2][3];
+    if( !(dmgBits & DMG_BULLET || dmgBits & DMG_SLASH) ||
+        glbCvarValues[PC_KBON] <= 0 ||
+        flDamage <= 0.0 )
+        return;
+
+    if(bDuck && glbCvarValues[PC_KBDUCK] <= 0.0)
+        return;
+
+    new Float: vecOrigin[2][3];
     get_entvar(victim, var_origin, vecOrigin[0]);
     get_entvar(attacker, var_origin, vecOrigin[1]);
 
-    if(xs_vec_distance(vecOrigin[0], vecOrigin[1]) > flDistance)
+    if(xs_vec_distance(vecOrigin[0], vecOrigin[1]) > glbCvarValues[PC_KBDISTANCE])
         return;
 
-    static flags; flags = get_entvar(victim, var_flags);
+    new Float:flPower = 1.0;
 
-    static bool: bDuck; bDuck = ((flags & FL_DUCKING) && (flags & FL_ONGROUND));
-
-    static Float: vecNew[3];
-    xs_vec_copy(vecDir, vecNew);
-
-    static Float: vecVelocity[3];
-    get_entvar(victim, var_velocity, vecVelocity);
-
-    if(!bVertical)
-        vecNew[2] = 0.0;
-
-    new Float: flPower = 0.0;
-
-    if(bPower)
+    if(glbCvarValues[PC_KBPOWER])
     {
-        static item; item = get_member(attacker, m_pActiveItem);
+        flPower = get_entvar( get_member( attacker, m_pActiveItem ), var_fuser4 );
 
-        if((get_member(item, m_iId) > MAX_WEAPONS || get_entvar(item, var_impulse) > 0))
-            get_entvar(item, var_fuser4, flPower);
-        else
-            flPower = kb_weapon_power[get_member(item, m_iId)];
-
-        xs_vec_mul_scalar(vecNew, flPower, vecNew);
+        if(flPower > 0)
+            flPower = 1.0;
     }
 
-    if(bDamage)
+    if(glbCvarValues[PC_KBDAMAGE])
     {
-        flPower = flDamage;
-        xs_vec_mul_scalar(vecNew, flPower, vecNew);
+        flPower *= flDamage;
     }
 
-    if(bClass)
+    if(glbCvarValues[PC_KBCLASS])
     {
-        flPower = ArrayGetCell(ClassAttributes[Zombie_Knockback], iClass[victim]);
-        xs_vec_mul_scalar(vecNew, flPower, vecNew);
+        new Float:kb = ArrayGetCell(aZombieData[Zombie_Knockback], iRace[victim]);
+        flPower *= kb;
     }
 
     if(bDuck)
     {
-        flPower = flDuck;
-        xs_vec_mul_scalar(vecNew, flPower, vecNew);
+        flPower *= glbCvarValues[PC_KBDUCK];
     }
 
-    xs_vec_add(vecVelocity, vecNew, vecVelocity);
-
-    set_entvar(victim, var_velocity, vecVelocity);
+    MakeKnockback(victim, attacker, flPower, vecOrigin[1]);
 }
 
 public Hands_Post(item)
@@ -1131,38 +765,38 @@ public Hands_Post(item)
 
     new player = get_member(item, m_pPlayer);
 
-    if(!bZombie[player])
+    if(!IsZombie(player))
         return;
 
     new szModel[MAX_RESOURCE_PATH_LENGTH];
-    ArrayGetString(ClassInfo[Zombie_ClawModel], iClass[player], szModel, charsmax(szModel));
+    ArrayGetString(aZombieData[Zombie_ClawModel], iRace[player], szModel, charsmax(szModel));
     
     set_entvar(player, var_viewmodel, szModel);
     set_entvar(player, var_weaponmodel, "");
 
-    static Float: slashDmg,
+    new Float: slashDmg,
         Float: stabDmg,
         Float: slashDistance,
         Float: stabDistance;
     
-    slashDmg = ArrayGetCell(ClassAttributes[Zombie_AttackDamage], iClass[player]);
-    stabDmg = ArrayGetCell(ClassAttributes[Zombie_Attack2Damage], iClass[player]);
-    slashDistance = ArrayGetCell(ClassAttributes[Zombie_AttackDistance], iClass[player]);
-    stabDistance = ArrayGetCell(ClassAttributes[Zombie_Attack2Distance], iClass[player]);
+    slashDmg = ArrayGetCell(aZombieData[Zombie_AttackDamage], iRace[player]);
+    stabDmg = ArrayGetCell(aZombieData[Zombie_Attack2Damage], iRace[player]);
+    slashDistance = ArrayGetCell(aZombieData[Zombie_AttackDistance], iRace[player]);
+    stabDistance = ArrayGetCell(aZombieData[Zombie_Attack2Distance], iRace[player]);
 
-    if(slashDmg < 0.0)
+    if(slashDmg > 0.0)
     {
         set_member(player, m_Knife_flSwingBaseDamage, slashDmg);
         set_member(player, m_Knife_flSwingBaseDamage_Fast, slashDmg);
     }
     
-    if(stabDmg < 0.0)
+    if(stabDmg > 0.0)
         set_member(player, m_Knife_flStabBaseDamage, stabDmg);
 
-    if(slashDistance < 0.0)
+    if(slashDistance > 0.0)
         set_member(player, m_Knife_flSwingDistance, slashDistance);
 
-    if(stabDistance < 0.0)
+    if(stabDistance > 0.0)
         set_member(player, m_Knife_flStabDistance, stabDistance);
 }
 
@@ -1173,38 +807,33 @@ public HandsAttack1_Post(item)
 
     new player = get_member(item, m_pPlayer);
 
-    if(!bZombie[player])
+    if(!IsZombie(player))
         return;
 
     new Float: flAttackTime = get_member(item, m_Weapon_flNextPrimaryAttack);
-    new Float: DelayStart;
-    new Float: flAttack2Time;
+    new Float: flAttack2Time = 0.0;
 
-    if(flKnifeAttack1Time-0.1 < flAttackTime <= flKnifeAttack1Time)
+    if(flAttackTime == flKnifeAttack1Time)
     {
-        DelayStart = flKnifeAttack1Time - flAttackTime;
-
-        flAttack2Time = ArrayGetCell(ClassAttributes[Zombie_AttackDelay2], iClass[player]);
-        flAttackTime = ArrayGetCell(ClassAttributes[Zombie_AttackDelay], iClass[player]);
+        flAttack2Time = ArrayGetCell(aZombieData[Zombie_AttackDelay2], iRace[player]);
+        flAttackTime = ArrayGetCell(aZombieData[Zombie_AttackDelay], iRace[player]);
 
         if(flAttackTime > 0.0)
-            set_member(item, m_Weapon_flNextPrimaryAttack, flAttackTime-DelayStart);
+            set_member(item, m_Weapon_flNextPrimaryAttack, flAttackTime);
 
         if(flAttack2Time > 0.0)
-            set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime-DelayStart);
+            set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime);
     }
-    else if(flKnifeAttack1Miss-0.1 > flAttackTime <= flKnifeAttack1Miss)
+    else if(flAttackTime == flKnifeAttack1Miss)
     {
-        DelayStart = flKnifeAttack1Miss - flAttackTime;
-
-        flAttack2Time = ArrayGetCell(ClassAttributes[Zombie_AttackDelayMiss2], iClass[player]);
-        flAttackTime = ArrayGetCell(ClassAttributes[Zombie_AttackDelayMiss], iClass[player]);
+        flAttack2Time = ArrayGetCell(aZombieData[Zombie_AttackDelayMiss2], iRace[player]);
+        flAttackTime = ArrayGetCell(aZombieData[Zombie_AttackDelayMiss], iRace[player]);
 
         if(flAttackTime > 0.0)
-            set_member(item, m_Weapon_flNextPrimaryAttack, flAttackTime-DelayStart);
+            set_member(item, m_Weapon_flNextPrimaryAttack, flAttackTime);
 
         if(flAttack2Time > 0.0)
-            set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime-DelayStart);
+            set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime);
     }
 }
 
@@ -1215,37 +844,741 @@ public HandsAttack2_Post(item)
 
     new player = get_member(item, m_pPlayer);
 
-    if(!bZombie[player])
+    if(!IsZombie(player))
         return;
 
     new Float: flAttack2Time = get_member(item, m_Weapon_flNextSecondaryAttack);
-    new Float: DelayStart = 0.0;
     new Float: flAttackTime = 0.0;
 
-    if(flKnifeAttack2Time-0.1 < flAttack2Time <= flKnifeAttack2Time)
+    if(flAttack2Time == flKnifeAttack2Time)
     {
-        DelayStart = flKnifeAttack2Time - flAttack2Time;
-
-        flAttackTime = ArrayGetCell(ClassAttributes[Zombie_Attack2Delay1], iClass[player]);
-        flAttack2Time = ArrayGetCell(ClassAttributes[Zombie_Attack2Delay], iClass[player]);
+        flAttackTime = ArrayGetCell(aZombieData[Zombie_Attack2Delay1], iRace[player]);
+        flAttack2Time = ArrayGetCell(aZombieData[Zombie_Attack2Delay], iRace[player]);
 
         if(flAttackTime > 0.0)
-            set_member(item, m_Weapon_flNextPrimaryAttack, flAttackTime-DelayStart);
+            set_member(item, m_Weapon_flNextPrimaryAttack, flAttackTime);
 
         if(flAttack2Time > 0.0)
-            set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime-DelayStart);
+            set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime);
     }
-    else if(flKnifeAttack2Miss-0.1 < flAttack2Time <= flKnifeAttack2Miss)
+    else if(flAttack2Time == flKnifeAttack2Miss)
     {
-        DelayStart = flKnifeAttack2Miss - flAttack2Time;
-
-        flAttackTime = ArrayGetCell(ClassAttributes[Zombie_AttackDelayMiss2], iClass[player]);
-        flAttack2Time = ArrayGetCell(ClassAttributes[Zombie_AttackDelayMiss], iClass[player]);
+        flAttackTime = ArrayGetCell(aZombieData[Zombie_AttackDelayMiss2], iRace[player]);
+        flAttack2Time = ArrayGetCell(aZombieData[Zombie_AttackDelayMiss], iRace[player]);
 
         if(flAttackTime > 0.0)
-            set_member(item, m_Weapon_flNextPrimaryAttack, flAttackTime-DelayStart);
+            set_member(item, m_Weapon_flNextPrimaryAttack, flAttackTime);
 
         if(flAttack2Time > 0.0)
-            set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime-DelayStart);
+            set_member(item, m_Weapon_flNextSecondaryAttack, flAttackTime);
     }
+}
+
+stock MakeKnockback(id, attacker, Float:speed, Float:vecOrigin[3])
+{
+    new Float:vecAngles[3];
+    get_entvar(attacker, var_v_angle, vecAngles);
+    angle_vector(vecAngles, ANGLEVECTOR_FORWARD, vecOrigin);
+    xs_vec_mul_scalar(vecOrigin, speed * 10.0, vecOrigin);
+
+    new Float:vecVelocity[3]; get_entvar(id, var_velocity, vecVelocity);
+    xs_vec_add(vecOrigin, vecVelocity, vecOrigin);
+
+    if(!glbCvarValues[PC_KBVERTICAL])
+        vecOrigin[2] = vecVelocity[2];
+
+    set_entvar(id, var_velocity, vecOrigin);
+}
+
+stock GetGunPosition(id, Float:origin[3], Float:ret[3])
+{
+    new Float:vecView[3]; get_entvar(id, var_view_ofs, vecView);
+    xs_vec_add(origin, vecView, vecView);
+    ret = vecView;
+}
+
+/* *[-> CLIENT <-]* */
+public client_connect( pPlayer )
+{
+    iRace[ pPlayer ] = 0;
+    iNextRace[ pPlayer ] = 0;
+}
+
+public ReHook_CBasePlayer_Pain( pPlayer )
+{
+    if( !IsZombie( pPlayer ) )
+        return HC_CONTINUE;
+
+    new rand, szSound[ 64 ], Array: a;
+    a = ArrayGetCell( aZombieData[ Zombie_HurtSounds ], iRace[ pPlayer ] );
+    
+    new size = ArraySize( a ) - 1;
+
+    if ( a == Invalid_Array )
+        return HC_CONTINUE;
+
+    if ( size < 0 )
+        return HC_SUPERCEDE;
+    
+    rand = random_num( 0, size );
+
+    ArrayGetString( a, rand, szSound, charsmax( szSound ) );
+
+    emit_sound( pPlayer, CHAN_VOICE, szSound, 1.0, ATTN_NORM, SND_SPAWNING, PITCH_NORM );
+
+    return HC_SUPERCEDE;
+}
+
+public ReHook_CBasePlayer_Death( pPlayer )
+{
+    if( !IsZombie( pPlayer ) )
+        return HC_CONTINUE;
+
+    new rand, szSound[ 64 ], Array: a;
+    a = ArrayGetCell( aZombieData[ Zombie_DeathSounds ], iRace[ pPlayer ] );
+    
+    new size = ArraySize( a ) - 1;
+
+    if ( a == Invalid_Array )
+        return HC_CONTINUE;
+
+    if ( size < 0 )
+        return HC_SUPERCEDE;
+    
+    rand = random_num( 0, size );
+
+    ArrayGetString( a, rand, szSound, charsmax( szSound ) );
+
+    emit_sound( pPlayer, CHAN_VOICE, szSound, 1.0, ATTN_NORM, SND_SPAWNING, PITCH_NORM );
+
+    return HC_SUPERCEDE;
+}
+
+public ReHook_CBasePlayer_TakeDamage_Post( pPlayer, pInflictor, pAttacker, Float:flDamage, bitsDamage )
+{
+    if ( pPlayer == pAttacker || flDamage <= 0.0 || !(bitsDamage & DMG_BULLET || bitsDamage & DMG_SLASH) )
+        return;
+
+    if ( IsZombie( pAttacker ) || IsHuman( pPlayer ) )
+        return;
+
+    if ( get_entvar( pPlayer, var_armorvalue ) <= 0 )
+        set_member( pPlayer, m_iKevlar, PlagueArmor_None );
+
+    set_member( pPlayer, m_flVelocityModifier, ArrayGetCell( aZombieData[ Zombie_Painshock ], iRace[ pPlayer ] ) );
+}
+
+public ReHook_CBasePlayer_TakeDamage( pPlayer, pInflictor, pAttacker, Float:flDamage, bitsDamage )
+{
+    if ( pPlayer == pAttacker || flDamage <= 0.0 || !(bitsDamage & DMG_BULLET || bitsDamage & DMG_SLASH) )
+        return HC_CONTINUE;
+
+    if ( IsZombie( pAttacker ) || IsHuman( pPlayer ) )
+        return HC_CONTINUE;
+
+    new armor_value = get_entvar( pPlayer, var_armorvalue );
+    new PlagueArmor: armor = get_member( pPlayer, m_iKevlar );
+
+    if ( armor == PlagueArmor_None || ( armor == PlagueArmor_VestHelm && get_member( pPlayer, m_LastHitGroup ) == HITGROUP_HEAD ) )
+        return HC_CONTINUE;
+
+    new armor_dmg = floatround( flDamage * 0.25 );
+    armor_value -= armor_dmg;
+
+    if ( armor_value < 0 )
+    {
+        armor_dmg -= armor_value;
+        armor_value = 0;
+    }
+
+    SetHookChainArg( 4, ATYPE_FLOAT, flDamage - float( armor_dmg ) );
+
+    return HC_CONTINUE;
+}
+
+public Plague_Change_Class_Post( pPlayer, pAttacker, PlagueClassId: class, bool: bSpawned )
+{
+    if ( class != ZombieClassId )
+        return;
+
+    Transform( pPlayer, pAttacker, .bSpawned = bSpawned );
+}
+
+/* *[-> STOCKS <-]* */
+stock Transform( pPlayer, pAttacker, bool:call = true, bool:bSpawned = true, bool:checkFlags = true )
+{
+    if ( call )
+    {
+        new ret;
+        ExecuteForward( fwdZombify, _, pPlayer, pAttacker, bSpawned );
+        
+        if ( ret > Plague_Continue )
+            return;
+    }
+
+    if ( iNextRace[ pPlayer ] != iRace[ pPlayer ] )
+    {
+        if ( !CanUseRace( pPlayer, iRace[ pPlayer ], checkFlags ) )
+        {
+            iNextRace[ pPlayer ] = iRace[ pPlayer ] = FirstRaceAvailable( pPlayer );
+        }
+        else {
+            iRace[ pPlayer ] = iNextRace[ pPlayer ];
+        }
+    }
+
+    if ( is_user_alive( pPlayer ) )
+    {
+        for(new any:i = 1; i < MAX_ITEM_TYPES; i++)
+        {
+            if(i < 3)
+            rg_drop_items_by_slot(pPlayer, i);
+            else
+            rg_remove_items_by_slot(pPlayer, i);
+        }
+
+        rg_give_item(pPlayer, "weapon_hegrenade");
+        new claw = rg_give_item(pPlayer, "weapon_knife");
+        rg_switch_weapon(pPlayer, claw);
+
+        if ( bSpawned )
+        {
+            new Array:a = ArrayGetCell( aZombieData[ Zombie_SpawnSounds ], iRace[ pPlayer ] );
+            new size = ArraySize( a ) - 1;
+            if ( size >= 0 )
+            {
+                new szSound[ 64 ];
+                new rand = random_num( 0, size );
+                ArrayGetString( a, rand, szSound, charsmax( szSound ) );
+                emit_sound( pPlayer, CHAN_VOICE, szSound, 1.0, ATTN_NORM, SND_SPAWNING, PITCH_NORM );
+            }
+        }
+        
+        ResetTransformationStats( pPlayer, .bHealth = bSpawned );
+
+        if ( pAttacker > -1 )
+            TransformNotice( pPlayer, pAttacker );
+    }
+
+    if ( call )
+        ExecuteForward( fwdZombified, _, pPlayer, pAttacker, bSpawned);
+}
+
+stock ResetTransformationStats( pPlayer, bool:bModel = true, bool:bHealth = true, bool:bGravity = true, bool:bSpeed = true )
+{
+    if ( !is_user_alive( pPlayer ) )
+        return;
+    
+    new race = iRace[ pPlayer ];
+    if ( bModel )
+    {
+        new szModel[ 32 ];
+        ArrayGetString( aZombieData[ Zombie_Model ], race, szModel, charsmax( szModel ) );
+        rg_set_user_model( pPlayer, szModel, true );
+    }
+
+    if ( bHealth )
+    {
+        new health = ArrayGetCell( aZombieData[ Zombie_Health ], race );
+        set_entvar( pPlayer, var_health, float( health ) );
+        set_entvar( pPlayer, var_max_health, float( health ) );
+    }
+
+    if ( bGravity )
+    {
+        new gravity = ArrayGetCell( aZombieData[ Zombie_Gravity ], race );
+        set_entvar( pPlayer, var_gravity, float( gravity ) / 800.0 );
+    }
+
+    if ( bSpeed )
+    {
+        rg_reset_maxspeed( pPlayer );
+    }
+}
+
+stock FirstRaceAvailable( pPlayer )
+{
+    new race = 0;
+    for ( new i = 0; i < iRaceCount; i++ )
+    {
+        if ( CanUseRace( pPlayer, i ) )
+        {
+            race = i;
+            break;
+        }
+    }
+
+    return race;
+}
+
+stock bool:CanUseRace( pPlayer, race, bool:ignoreFlags = false )
+{
+    if( ignoreFlags )
+        return true;
+
+    new flags = 0;
+    flags = ArrayGetCell( aZombieData[ Zombie_Flags ], race );
+
+    if( ( get_user_flags( pPlayer ) & flags ) == flags || flags <= 0 )
+        return true;
+
+    return false;
+}
+
+stock bool:CanShow( pPlayer, race )
+{
+    new MenuShow: menuShow = ArrayGetCell( aZombieData[ Zombie_MenuShow ], race );
+
+    if ( menuShow == MenuShow_No )
+        return false;
+
+    if ( menuShow == MenuShow_Flag )
+    {
+        new flags = ArrayGetCell( aZombieData[ Zombie_Flags ], race );
+
+        if ( ( get_user_flags( pPlayer ) & flags ) == flags || flags <= 0 )
+            return true;
+
+        return false;
+    }
+
+    new ret;
+    ExecuteForward( fwdShow, ret, pPlayer, race );
+
+    if ( ret > Plague_Continue )
+        return false;
+
+    return true;
+}
+
+stock TransformNotice(id, attacker)
+{
+    static iDeathMsg, iScoreAttrib;
+    if(!iDeathMsg) iDeathMsg = get_user_msgid("DeathMsg");
+    if(!iScoreAttrib) iScoreAttrib = get_user_msgid("ScoreAttrib");
+
+    message_begin(MSG_BROADCAST, iDeathMsg);
+    write_byte(attacker);
+    write_byte(id);
+    write_byte(0);
+    write_string("teammate");
+    message_end();
+
+    message_begin(MSG_BROADCAST, iScoreAttrib);
+    write_byte(id);
+    write_byte(0);
+    message_end();
+}
+
+stock ShowRaceMenu( pPlayer )
+{
+    if ( iRaceCount <= 1 )
+        return;
+    
+    new menu = menu_create( "Zombie Races", "RaceHandler" );
+
+    new szFormat[ 128 ], szName[ 64 ];
+
+    for ( new i = 0; i < iRaceCount; i++ )
+    {
+        if ( !CanShow( pPlayer, i ) )
+            continue;
+
+        ArrayGetString( aZombieData[ Zombie_Name ], i, szName, charsmax( szName ) );
+        formatex( szFormat, charsmax( szFormat ), "%s%s", ( iNextRace[ pPlayer ] == i ? "\d" : "" ), szName );
+        menu_additem( menu, szFormat, fmt( "%i", i ) );
+    }
+
+    menu_display( pPlayer, menu );
+}
+
+public RaceHandler( pPlayer, menu, item )
+{
+    if ( item == MENU_EXIT )
+    {
+        menu_destroy( menu );
+        return;
+    }
+
+    new szDesc[ 3 ];
+    menu_item_getinfo( menu, item, _, szDesc, charsmax( szDesc ) );
+
+    new race = str_to_num( szDesc );
+
+    new ret;
+    ExecuteForward( fwdChoose, ret, pPlayer, race );
+
+    if ( ret == Plague_Stop )
+    {
+        menu_display( pPlayer, menu );
+        return;
+    }
+
+    menu_destroy( menu );
+
+    if ( ret == Plague_Handled )
+        return;
+
+    if ( !CanUseRace( pPlayer, race, true ) )
+        return;
+
+    iNextRace[ pPlayer ] = race;
+
+    ChatSelectionInfo( pPlayer );
+
+    ExecuteForward( fwdChoosePost, _, pPlayer, race );
+}
+
+stock ChatSelectionInfo( pPlayer )
+{
+    new szName[ 64 ];
+    new hp = ArrayGetCell( aZombieData[ Zombie_Health ], iNextRace[ pPlayer ]),
+        gravity = ArrayGetCell( aZombieData[ Zombie_Gravity ], iNextRace[ pPlayer ]),
+        Float: speed = ArrayGetCell( aZombieData[ Zombie_Speed ], iNextRace[ pPlayer ]),
+        Float: kb = ArrayGetCell( aZombieData[ Zombie_Knockback ], iNextRace[ pPlayer ] );
+    ArrayGetString( aZombieData[ Zombie_Name ], iNextRace[ pPlayer ], szName, charsmax( szName ) );
+
+    client_print_color( pPlayer, 0, "^x04[ZP] ^x01You selected the ^x03Zombie Race: ^x04%s.", szName );
+    client_print_color( pPlayer, 0, "^x04[ZP] ^x01Health: ^x04%i ^x03| ^x01Gravity: ^x04%i ^x03| ^x01Speed: ^x04%.2f ^x03| ^x01Knockback: ^x04%i%%^x01.", hp, gravity, speed, floatround( kb ) * 100 );
+}
+
+/* *[-> NATIVES <-]* */
+public Native_RegRace( plgId, params )
+{
+    if ( params < 2 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return -1;
+    }
+
+    new szSysName[ 32 ];
+    get_string( 1, szSysName, charsmax( szSysName ) );
+
+    if ( strlen( szSysName ) <= 0 )
+    {
+        log_error( AMX_ERR_NATIVE, "Zombie Race can't be registered with empty name" );
+        return -1;
+    }
+
+    new id, bool:exist;
+    if ( ( exist = TrieKeyExists( tZombies, szSysName ) ) && TrieGetCell( tZombies, szSysName, id ) && ArrayGetCell( aZombiePlgLoaded, id ) )
+    {
+        log_error( AMX_ERR_NATIVE, "Zombie Race ^"%s^" was already loaded by a plugin.", szSysName );
+        return -1;
+    }
+
+    if ( !exist )
+    {
+        new szName[ 64 ];
+        get_string( 2, szName, charsmax( szName ) );
+
+        new szModel[ 32 ];
+        get_string( 3, szModel, charsmax( szModel ) );
+
+        new szClaw[ 128 ];
+        get_string( 4, szClaw, charsmax( szClaw ) );
+
+        new health = get_param( 5 );
+        new gravity = get_param( 6 );
+        new Float:speed = get_param_f( 7 );
+        new Float:kb = get_param_f( 8 );
+        new Float:painshock = get_param_f( 9 );
+        new Array:dSound = Array: get_param( 10 );
+        new Array:sSound = Array: get_param( 11 );
+        new Array:pSound = Array: get_param( 12 );
+        new flags = get_param( 13 );
+        new MenuShow: menuShow = MenuShow:get_param( 14 );
+
+        return LoadRace( szSysName, szName, szClaw, szModel, dSound, sSound, pSound, 
+            health, gravity, speed, painshock, kb, flags, menuShow );
+    }
+
+    new szName[ 64 ];
+    new szModel[ 32 ];
+    new szClaw[ 128 ];
+
+    return LoadRace( szSysName, szName, szClaw, szModel, Invalid_Array, Invalid_Array, Invalid_Array, 
+                0, 0, 0.0, 0.0, 0.0, 0, MenuShow_No );
+}
+
+public Native_RaceCount() return iRaceCount;
+
+public Native_FirstAvailable( plgId, params )
+{
+    if ( params < 1 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return -1;
+    }
+
+    new id = get_param( 1 );
+
+    if ( !is_user_connected( id ) )
+    {
+        log_error( AMX_ERR_NATIVE, "User %i not connected." );
+        return -1;
+    }
+
+    return FirstRaceAvailable( id );
+}
+
+public Native_GetRace( plgId, params )
+{
+    if ( params < 1 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return -1;
+    }
+
+    new id = get_param( 1 );
+
+    if ( !is_user_connected( id ) )
+    {
+        log_error( AMX_ERR_NATIVE, "User %i not connected." );
+        return -1;
+    }
+
+    return iRace[ id ];
+}
+
+public Native_SetRace( plgId, params )
+{
+    if ( params < 5 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return;
+    }
+
+    new id = get_param( 1 );
+
+    if ( !is_user_connected( id ) )
+    {
+        log_error( AMX_ERR_NATIVE, "User %i not connected." );
+        return;
+    }
+
+    new race = get_param( 2 );
+
+    if ( race < 0 || race >= iRaceCount )
+    {
+        log_error( AMX_ERR_NATIVE, "Race id invalid." );
+        return;
+    }
+
+    new attacker = get_param( 3 );
+
+    new bool:spawn = bool: get_param( 4 );
+    new bool:check = bool: get_param( 5 );
+    new bool:call = bool: get_param( 6 );
+
+    iNextRace[ id ] = race;
+
+    Transform( id, attacker, call, spawn, check );
+}
+
+public Native_GetNextRace( plgId, params )
+{
+    if ( params < 1 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return -1;
+    }
+
+    new id = get_param( 1 );
+
+    if ( !is_user_connected( id ) )
+    {
+        log_error( AMX_ERR_NATIVE, "User %i not connected." );
+        return -1;
+    }
+
+    return iNextRace[ id ];
+}
+
+public Native_SetNextRace( plgId, params )
+{
+    if ( params < 2 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return;
+    }
+
+    new id = get_param( 1 );
+
+    if ( !is_user_connected( id ) )
+    {
+        log_error( AMX_ERR_NATIVE, "User %i not connected." );
+        return;
+    }
+
+    new race = get_param( 2 );
+
+    if ( race < 0 || race >= iRaceCount )
+    {
+        log_error( AMX_ERR_NATIVE, "Race id invalid." );
+        return;
+    }
+
+    iNextRace[ id ] = race;
+}
+
+public any: Native_GetZombieData( plgId, params )
+{
+    if ( params < 2 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return 0;
+    }
+
+    new ZombieData: data = ZombieData: get_param( 1 );
+    
+    if ( data < Zombie_SystemName || data >= ZombieData )
+    {
+        log_error( AMX_ERR_NATIVE, "Zombie Data Invalid." );
+        return 0;
+    }
+
+    new race = get_param( 2 );
+
+    if ( race < 0 || race > iRaceCount )
+    {
+        log_error( AMX_ERR_NATIVE, "Race id invalid" );
+        return 0;
+    }
+
+    switch( data )
+    {
+        case Zombie_Name: {
+            if ( params < 4 )
+            {
+                log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+                return 0;
+            }
+
+            new szString[ 64 ];
+            ArrayGetString( aZombieData[ data ], race, szString, charsmax( szString ) );
+
+            set_string( 3, szString, get_param( 4 ) );
+        }
+
+        case Zombie_SystemName, Zombie_Model: {
+            if ( params < 4 )
+            {
+                log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+                return 0;
+            }
+
+            new szString[ 32 ];
+            ArrayGetString( aZombieData[ data ], race, szString, charsmax( szString ) );
+
+            set_string( 3, szString, get_param( 4 ) );
+        }
+
+        case Zombie_Speed: {
+            if ( params == 3 )
+                set_float_byref( 3, ArrayGetCell( aZombieData[ data ], race ) );
+            else 
+                return ArrayGetCell( aZombieData[ data ], race );
+        }
+
+        default: {
+            if ( params == 3 )
+                set_param_byref( 3, ArrayGetCell( aZombieData[ data ], race ) );
+            else
+                return ArrayGetCell( aZombieData[ data ], race );
+        }
+    }
+
+    return 1;
+}
+
+public Native_SetZombieData( plgId, params )
+{
+    if ( params < 3 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return 0;
+    }
+
+    new ZombieData: data = ZombieData: get_param( 1 );
+    
+    if ( data < Zombie_SystemName || data >= ZombieData )
+    {
+        log_error( AMX_ERR_NATIVE, "Zombie Data Invalid." );
+        return 0;
+    }
+
+    new race = get_param( 2 );
+
+    if ( race < 0 || race > iRaceCount )
+    {
+        log_error( AMX_ERR_NATIVE, "Race id invalid" );
+        return 0;
+    }
+
+    switch( data )
+    {
+        case Zombie_Name: {
+            new szString[ 64 ];
+            get_string( 3, szString, charsmax( szString ) );
+            ArraySetString( aZombieData[ data ], race, szString );
+        }
+
+        case Zombie_Model: {
+            new szString[ 32 ];
+            get_string( 3, szString, charsmax( szString ) );
+            ArraySetString( aZombieData[ data ], race, szString );
+        }
+
+        case Zombie_SystemName: {
+            log_error( AMX_ERR_NATIVE, "Zombie System Name cannot be changed." );
+            return 0;
+        }
+
+        case Zombie_Speed: {
+            ArraySetCell( aZombieData[ data ], race, get_param_f( 3 ) );
+        }
+
+        default: {
+            ArrayGetCell( aZombieData[ data ], race, get_param( 3 ) );
+        }
+    }
+
+    return 1;
+}
+
+public Native_ZombiesMenu( plgId, params )
+{
+    if ( params < 1 )
+    {
+        log_error( AMX_ERR_NATIVE, "Not enough params to execute." );
+        return;
+    }
+
+    new id = get_param( 1 );
+
+    if ( !is_user_connected( id ) )
+    {
+        log_error( AMX_ERR_NATIVE, "User %i not connected." );
+        return;
+    }
+
+    ShowRaceMenu( id );
+}
+
+public Native_ResetAttr( pPlayer, bool:bModel, bool:bHealth, bool:bGravity, bool:bSpeed )
+{
+    if ( !is_user_connected( pPlayer ) )
+    {
+        log_error( AMX_ERR_NATIVE, "Player %i not connected.", pPlayer );
+        return;
+    }
+
+    if ( !IsZombie( pPlayer ) )
+    {
+        log_error( AMX_ERR_NATIVE, "Attempted resetting attributes on non-Zombie class." );
+        return;
+    }
+
+    ResetTransformationStats( pPlayer, bModel, bHealth, bGravity, bSpeed );
 }

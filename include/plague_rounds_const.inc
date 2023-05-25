@@ -12,6 +12,7 @@ enum GameWin {
 }
 
 enum WinEvent {
+    WinEvent_None,
     WinEvent_WFP,
     WinEvent_Restart,
     WinEvent_Expired,
@@ -26,7 +27,7 @@ enum RoundType {
 }
 
 enum RoundStatus {
-    RoundStatus_WaitingForPlayers,
+    RoundStatus_WaitingForPlayers = 0,
     RoundStatus_Starting,
     RoundStatus_Started,
     RoundStatus_Ended

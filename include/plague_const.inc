@@ -4,7 +4,7 @@
 
 #define _included_plague_const
 
-enum PlagueAction
+enum _:PlagueAction
 {
     Plague_Continue = 89,
     Plague_Handled,
